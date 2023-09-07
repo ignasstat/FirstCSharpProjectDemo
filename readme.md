@@ -192,3 +192,79 @@ $excel.Quit()
 
 
 
+
+
+
+
+
+function Compare-ExcelWithTxt {
+    param(
+        [string]$ExcelFilePath,
+        [string]$TxtFilePath
+    )
+
+    # Load the Excel interop assembly
+    Add-Type -AssemblyName Microsoft.Office.Interop.Excel
+
+    # Create an Excel application object
+    $excel = New-Object -ComObject Excel.Application
+
+    # Open the Excel workbook
+    $workbook = $excel.Workbooks.Open($ExcelFilePath)
+
+    # Get the first worksheet
+    $worksheet = $workbook.Sheets.Item(1)
+
+    # Get the used range of cells in the worksheet
+    $usedRange = $worksheet.UsedRange
+
+    # Initialize an array to store Excel data
+    $excelData = @()
+
+    # Loop through the rows in the used range
+    for ($row = 2; $row -le $usedRange.Rows.Count; $row++) {
+        $columnCValue = $usedRange.Cells.Item($row, 3).Value2
+        $columnDValue = $usedRange.Cells.Item($row, 4).Value2
+        $columnEValue = $usedRange.Cells.Item($row, 5).Value2
+
+        $excelData += [PSCustomObject]@{
+            ColumnC = $columnCValue
+            ColumnD = $columnDValue
+            ColumnE = $columnEValue
+        }
+    }
+
+    # Close the Excel workbook and application
+    $workbook.Close()
+    $excel.Quit()
+
+    # Release the Excel interop objects
+    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($worksheet) | Out-Null
+    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($workbook) | Out-Null
+    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
+
+    # Read the text file
+    $txtData = Get-Content -Path $TxtFilePath | ForEach-Object {
+        $clientName, $actualValue = $_ -split '\|'
+        [PSCustomObject]@{
+            ClientName = $clientName.Trim()
+            ActualValue = $actualValue.Trim()
+        }
+    }
+
+    # Compare Excel data with text file data
+    $differences = Compare-Object -ReferenceObject $excelData -DifferenceObject $txtData -Property ClientName, ActualValue
+
+    # Output the differences
+    if ($differences.Count -eq 0) {
+        Write-Host "No differences found."
+    } else {
+        Write-Host "Differences found:"
+        $differences | Format-Table -AutoSize
+    }
+}
+
+# Usage example:
+# Compare-ExcelWithTxt -ExcelFilePath "C:\path\to\your\excel.xlsx" -TxtFilePath "C:\path\to\your\textfile.txt"
+
+
