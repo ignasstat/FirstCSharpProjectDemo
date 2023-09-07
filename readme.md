@@ -130,3 +130,65 @@ function Compare-ExcelWithTxt {
 
 # Usage example:
 # Compare-ExcelWithTxt -ExcelFilePath "C:\path\to\your\excel.xlsx" -TxtFilePath "C:\path\to\your\textfile.txt"
+
+
+
+
+
+
+-----------------------------
+
+# Create an instance of the Excel application object
+$excel = New-Object -ComObject Excel.Application
+
+# Set the visibility of the Excel application to false
+$excel.Visible = $false
+
+# Open the Excel file
+$workbook = $excel.Workbooks.Open("\\valdotcsclu06s06\backoffice_shares$\dataoperations\eftcd\is_transfer\tot 523\callmonitoraudit.xlsx")
+
+# Get the first worksheet in the workbook
+$worksheet = $workbook.Sheets.Item(1)
+
+# Get the used range of cells in the worksheet
+$usedRange = $worksheet.UsedRange
+
+# Loop through the rows in the used range
+for ($row = 2; $row -le $usedRange.Rows.Count; $row++) {
+    # Get the values in columns C, D, and E
+    $columnCValue = $usedRange.Cells.Item($row, 3).Value2
+    $columnDValue = $usedRange.Cells.Item($row, 4).Value2
+    $columnEValue = $usedRange.Cells.Item($row, 5).Value2
+
+    # Check if columns C and D have "N" values and if column E has "Y" value
+    #Alternatively can use Switch
+    if ($columnCValue -eq "N") {
+        # Found a match
+        Write-Host "Found a row with 'N' values in columns C and D, and 'Y' value in column E."
+        Write-Host "Row: $row"
+    }
+     if ($columnDValue -eq "N") {
+        # Found a match
+        Write-Host "Found a row with 'N' values in columns C and D, and 'Y' value in column E."
+        Write-Host "Row: $row"
+    }
+     if ($columnEValue -eq "Y") {
+        # Found a match
+        Write-Host "Found a row with 'N' values in columns C and D, and 'Y' value in column E."
+        Write-Host "Row: $row"
+    }
+}
+
+# Close the Excel file
+$workbook.Close()
+
+# Quit the Excel application
+$excel.Quit()
+
+# Release the Excel interop objects
+[System.Runtime.Interopservices.Marshal]::ReleaseComObject($worksheet) | Out-Null
+[System.Runtime.Interopservices.Marshal]::ReleaseComObject($workbook) | Out-Null
+[System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
+
+
+
