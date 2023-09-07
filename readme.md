@@ -58,3 +58,75 @@ Function sendEmail(strTo As String, strSubject As String, strTextBody As String,
     Set objFields = Nothing
 
 End Function
+
+
+
+
+
+
+
+
+
+function Compare-ExcelWithTxt {
+    param(
+        [string]$ExcelFilePath,
+        [string]$TxtFilePath
+    )
+
+    # Load the Excel interop assembly
+    Add-Type -AssemblyName Microsoft.Office.Interop.Excel
+
+    # Create an Excel application object
+    $excel = New-Object -ComObject Excel.Application
+
+    # Open the Excel workbook
+    $workbook = $excel.Workbooks.Open($ExcelFilePath)
+
+    # Get the first worksheet
+    $worksheet = $workbook.Worksheets.Item(1)
+
+    # Read the Excel data into an array
+    $excelData = @()
+    $row = 2 # Assuming data starts from the second row
+    while ($true) {
+        $clientName = $worksheet.Cells.Item($row, 1).Value2
+        if ([string]::IsNullOrEmpty($clientName)) {
+            break
+        }
+
+        $actualValue = $worksheet.Cells.Item($row, 2).Value2
+        $excelData += [PSCustomObject]@{
+            ClientName = $clientName
+            ActualValue = $actualValue
+        }
+
+        $row++
+    }
+
+    # Close the Excel workbook and application
+    $workbook.Close()
+    $excel.Quit()
+
+    # Read the text file
+    $txtData = Get-Content -Path $TxtFilePath | ForEach-Object {
+        $clientName, $actualValue = $_ -split '\|'
+        [PSCustomObject]@{
+            ClientName = $clientName.Trim()
+            ActualValue = $actualValue.Trim()
+        }
+    }
+
+    # Compare Excel data with text file data
+    $differences = Compare-Object -ReferenceObject $excelData -DifferenceObject $txtData -Property ClientName, ActualValue
+
+    # Output the differences
+    if ($differences.Count -eq 0) {
+        Write-Host "No differences found."
+    } else {
+        Write-Host "Differences found:"
+        $differences | Format-Table -AutoSize
+    }
+}
+
+# Usage example:
+# Compare-ExcelWithTxt -ExcelFilePath "C:\path\to\your\excel.xlsx" -TxtFilePath "C:\path\to\your\textfile.txt"
