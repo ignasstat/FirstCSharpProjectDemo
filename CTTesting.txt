@@ -1,31 +1,48 @@
-Function EmptyFile(myFile As String)
-
-Dim mf As Object
-Dim Dummy As String
-
-' nothing to do unless file exists
-If Not fso.FileExists(myFile) Then
-    EmptyFile = False
-Else
-    Set mf = fso.GetFile(myFile)
+Function HeaderOnlyFile(myFile As String) As Boolean
+    Dim mf As Object
+    Dim Dummy As String
+    Dim LineCount As Long
     
-    If mf.Size = 0 Then
-        EmptyFile = True
-    ElseIf Right(myFile, 4) = ".csv" Then
-        ' delimited file, need to check how many lines are in it
-        Set mf = Nothing
-        
-        Set mf = fso.OpenTextFile(myFile, ForReading)
-        Dummy = mf.ReadLine
-        If mf.AtEndOfStream Then
-            EmptyFile = True
-        Else
-            EmptyFile = False
-        End If
-        mf.Close
+    ' Nothing to do unless the file exists
+    If Not fso.FileExists(myFile) Then
+        HeaderOnlyFile = False
     Else
-        EmptyFile = False
+        Set mf = fso.GetFile(myFile)
+        
+        If mf.Size = 0 Then
+            ' File is empty
+            HeaderOnlyFile = False
+        ElseIf Right(myFile, 4) = ".csv" Then
+            ' Delimited file, need to check how many lines are in it
+            Set mf = Nothing
+            
+            Set mf = fso.OpenTextFile(myFile, ForReading)
+            
+            ' Initialize LineCount
+            LineCount = 0
+            
+            ' Read the first line (header)
+            Dummy = mf.ReadLine
+            LineCount = LineCount + 1
+            
+            ' Check if there is anything else in the file
+            Do While Not mf.AtEndOfStream
+                ' Read the next line
+                Dummy = mf.ReadLine
+                LineCount = LineCount + 1
+            Loop
+            
+            If LineCount = 1 Then
+                ' Only one line in the file (header only)
+                HeaderOnlyFile = True
+            Else
+                HeaderOnlyFile = False
+            End If
+            
+            mf.Close
+        Else
+            ' Unsupported file type (not a .csv)
+            HeaderOnlyFile = False
+        End If
     End If
-End If
-
 End Function
