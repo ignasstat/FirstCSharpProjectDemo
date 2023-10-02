@@ -12,8 +12,8 @@ Function HeaderOnlyFile(myFile As String) As Boolean
         If mf.Size = 0 Then
             ' File is empty
             HeaderOnlyFile = False
-        ElseIf Right(myFile, 4) = ".csv" Then
-            ' Delimited file, need to check how many lines are in it
+        ElseIf (Right(myFile, 4) = ".csv" Or Right(myFile, 4) = ".txt") Then
+            ' CSV or TXT file, need to check how many lines are in it
             Set mf = Nothing
             
             Set mf = fso.OpenTextFile(myFile, ForReading)
@@ -41,7 +41,7 @@ Function HeaderOnlyFile(myFile As String) As Boolean
             
             mf.Close
         Else
-            ' Unsupported file type (not a .csv)
+            ' Unsupported file type
             HeaderOnlyFile = False
         End If
     End If
