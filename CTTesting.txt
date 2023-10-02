@@ -1,38 +1,31 @@
+Function EmptyFile(myFile As String)
 
-Function TextFileContainsOnlyHeader(filePath As String, header As String) As Boolean
-    Dim fileContents As String
-    Dim headerPosition As Long
-    
-    ' Read the entire contents of the text file
-    Open filePath For Input As #1
-    fileContents = Input$(LOF(1), 1)
-    Close #1
-    
-    ' Find the position of the header in the file
-    headerPosition = InStr(1, fileContents, header, vbTextCompare)
-    
-    ' Check if the header is found at the beginning of the file
-    ' and if there is nothing after it
-    TextFileContainsOnlyHeader = (headerPosition = 1) And (Len(fileContents) = Len(header))
-End Function
+Dim mf As Object
+Dim Dummy As String
 
-
-Sub TestTextFileContainsOnlyHeader()
-    Dim filePath As String
-    Dim header As String
-    Dim result As Boolean
+' nothing to do unless file exists
+If Not fso.FileExists(myFile) Then
+    EmptyFile = False
+Else
+    Set mf = fso.GetFile(myFile)
     
-    ' Set the file path and the expected header
-    filePath = "C:\path\to\your\textfile.txt"
-    header = "This is the header"
-    
-    ' Call the function and store the result in 'result'
-    result = TextFileContainsOnlyHeader(filePath, header)
-    
-    ' Display the result
-    If result Then
-        MsgBox "The text file contains only the header."
+    If mf.Size = 0 Then
+        EmptyFile = True
+    ElseIf Right(myFile, 4) = ".csv" Then
+        ' delimited file, need to check how many lines are in it
+        Set mf = Nothing
+        
+        Set mf = fso.OpenTextFile(myFile, ForReading)
+        Dummy = mf.ReadLine
+        If mf.AtEndOfStream Then
+            EmptyFile = True
+        Else
+            EmptyFile = False
+        End If
+        mf.Close
     Else
-        MsgBox "The text file does not contain only the header."
+        EmptyFile = False
     End If
-End Sub
+End If
+
+End Function
