@@ -1,48 +1,118 @@
-Function HeaderOnlyFile(myFile As String) As Boolean
-    Dim mf As Object
-    Dim Dummy As String
-    Dim LineCount As Long
+Function CheckFileExists(lngFileID As Long, JobNumber As String) As String
+
+    Dim rst As Recordset
+    Dim strSQL As String
+    Dim strFile As String
+    Dim fileExistsTriggerFullPath As String
+    Dim foundFolder As String
+    Dim fileFoundPath As String
+    Dim foundNotEmpty As String
+    Dim fileFoundNotEmptyPath As String
+    Dim foundEmpty As String
+    Dim fileFoundEmptyPath As String
+    Dim fileNotFoundPath As String
+    Dim notFoundFolder As String
+    Dim doneFolder As String
+    Dim fileExistsTriggerToProcessFolder As String
+    Dim HeaderInFirstRow As String
     
-    ' Nothing to do unless the file exists
-    If Not fso.FileExists(myFile) Then
-        HeaderOnlyFile = False
-    Else
-        Set mf = fso.GetFile(myFile)
+    Dim FileExists As String
         
-        If mf.Size = 0 Then
-            ' File is empty
-            HeaderOnlyFile = False
-        ElseIf (Right(myFile, 4) = ".csv" Or Right(myFile, 4) = ".txt") Then
-            ' CSV or TXT file, need to check how many lines are in it
-            Set mf = Nothing
+    Set rst = New Recordset
+    strSQL = "select * from dbo.vw_ExistingFiles where fileid = " & LTrim(str(lngFileID))
+    rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+
+    If rst.EOF Then
+        MsgBox ("file no longer in view (some one else may have processed it")
+        rst.Close
+    Else
+        strFile = rst("Folder") & rst("Filename")
+        rst.Close
+        
+        'CTC 116 - variable is being used in PS script CalltraceFileExists_ToRelease.ps1. If No header in first row then just checking if a file is empty
+        strSQL = "SELECT HeadersInFirstRow FROM neptunefileimporter.[fileimporter].[Jobs] "
+        strSQL = strSQL & "WHERE JobId IN (SELECT Max(JobId) FROM neptunefileimporter.[fileimporter].[Jobs] WHERE DestinationTable =  '" & JobNumber & "'" & ")"
+        rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+        'When
+        If rst.EOF Then
+            MsgBox ("Cannot get HeadersInFirstRow a value form neptunefileimporter.[fileimporter].[Jobs]")
+            rst.Close
+        Else
+            HeaderInFirstRow = rst("HeadersInFirstRow")
+            rst.Close
+    
+                
+            'Setup trigger folder paths and paths to the triggers
+            fileExistsTriggerToProcessFolder = FileExistsTriggerFolder & "ToProcess\"
+            fileExistsTriggerFullPath = fileExistsTriggerToProcessFolder & lngFileID & ".trg"
             
-            Set mf = fso.OpenTextFile(myFile, ForReading)
+            foundFolder = FileExistsTriggerFolder & "Found\"
+            foundNotEmpty = foundFolder & "NotEmpty\"
+            foundEmpty = foundFolder & "Empty\"
+            notFoundFolder = FileExistsTriggerFolder & "NotFound\"
+            doneFolder = FileExistsTriggerFolder & "Done\"
             
-            ' Initialize LineCount
-            LineCount = 0
+            fileFoundNotEmptyPath = foundNotEmpty & lngFileID & ".trg"
+            fileFoundEmptyPath = foundEmpty & lngFileID & ".trg"
+            fileNotFoundPath = notFoundFolder & lngFileID & ".trg"
             
-            ' Read the first line (header)
-            Dummy = mf.ReadLine
-            LineCount = LineCount + 1
-            
-            ' Check if there is anything else in the file
-            Do While Not mf.AtEndOfStream
-                ' Read the next line
-                Dummy = mf.ReadLine
-                LineCount = LineCount + 1
-            Loop
-            
-            If LineCount = 1 Then
-                ' Only one line in the file (header only)
-                HeaderOnlyFile = True
-            Else
-                HeaderOnlyFile = False
+            'Before checking the trigger file, make sure to delete it if it was created before
+            If fso.FileExists(fileFoundNotEmptyPath) Then
+               'Delete the trigger
+                fso.DeleteFile (fileFoundNotEmptyPath)
+            ElseIf fso.FileExists(fileFoundEmptyPath) Then
+               'Delete the trigger
+                fso.DeleteFile (fileFoundEmptyPath)
+            ElseIf fso.FileExists(fileNotFoundPath) Then
+               'Delete the trigger
+                fso.DeleteFile (fileNotFoundPath)
             End If
             
-            mf.Close
-        Else
-            ' Unsupported file type
-            HeaderOnlyFile = False
+            'EFT 769 - Adding additional check if a file is already exist.
+            If fso.FileExists(fileExistsTriggerFullPath) Then
+                fso.DeleteFile (fileExistsTriggerFullPath)
+            End If
+            
+            'Create a trigger file called by fileID
+            Dim Fileout As TextStream
+            Set Fileout = fso.CreateTextFile(fileExistsTriggerFullPath, True, True)
+            
+            'Set trigger content to full file path (first row)
+            Fileout.Write strFile
+            Fileout.Write vbCrLf
+            'Adding new line JobNumber (second row)
+            Fileout.Write JobNumber
+            Fileout.Write vbCrLf
+            'Adding new line HeaderInFirstRow (third row)
+            Fileout.Write HeaderInFirstRow
+            
+            Fileout.Close
+            Set Fileout = Nothing
+    
+    '         Loop until trigger file appears in one of the two folders
+            While Not (fso.FileExists(fileFoundNotEmptyPath) Or (fso.FileExists(fileFoundEmptyPath)) Or (fso.FileExists(fileNotFoundPath)))
+            Wend
+            
+            'Check if trigger file was moved to notfound subfolder
+            If fso.FileExists(fileNotFoundPath) Then
+                CheckFileExists = "not found"
+                'try to remove the trigger if possible
+                On Error Resume Next
+                fso.DeleteFile (fileNotFoundPath)
+            'else the file exists
+            ElseIf fso.FileExists(fileFoundNotEmptyPath) Then
+                CheckFileExists = "OK"
+                'try to remove the trigger if possible
+                On Error Resume Next
+                fso.DeleteFile (fileFoundNotEmptyPath)
+            ElseIf fso.FileExists(fileFoundEmptyPath) Then
+                CheckFileExists = "Is empty"
+                'try to remove the trigger if possible
+                On Error Resume Next
+                fso.DeleteFile (fileFoundEmptyPath)
+            End If
         End If
     End If
+      
+
 End Function
