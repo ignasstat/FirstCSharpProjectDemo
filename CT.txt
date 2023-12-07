@@ -1,18 +1,41 @@
-# Define the SQL query result in a Here-String
-$sqlQueryResult = @'
-FileID, Source, Folder, FileName, CreatedDate, UpdatedDate, SuppliedDate, FileSize, FileExists
-1, E, C:\Folder1, File1.txt, 2023-01-01, 2023-01-02, 2023-01-03, 1024, Y
-2, I, C:\Folder2\CallTrace\, File2.txt, 2023-02-01, 2023-02-02, 2023-02-03, 2048, Y
-3, E, C:\Folder3\CallTrace\, File3.txt, 2022-12-01, 2023-01-02, 2023-01-05, 4096, Y
-4, I, C:\Folder4\CallTrace\, File4.txt, 2023-03-01, 2023-03-02, 2023-03-03, 8192, Y
-5, E, C:\Folder5, File5.txt, 2023-04-01, 2023-04-02, 2023-04-03, 16384, Y
-'@
+# Define your SQL query
+$sqlQuery = @"
+SELECT 
+	 FileID
+	,'E' AS [Source]
+	,Folder
+	,[FileName]
+	,CreatedDate
+	,UpdatedDate
+	,Supplieddate
+	,FileSize,
+	FileExists
+FROM xxx sfd
+WHERE FileExists = 'Y'
+UNION
+SELECT 
+	 DataIn_FileId
+	,'I' AS [Source]
+	,Folder
+	,[Filename]
+	,CreatedDate
+	,UpdatedDate
+	,SuppliedDate
+	,FileSize,
+	FileExists
+FROM yyy
+WHERE FileExists = 'Y'
+AND CHARINDEX('\CallTrace\', Folder) > 0
+"@
 
-# Convert the CSV string to a PowerShell object
-$data = $sqlQueryResult | ConvertFrom-Csv
+# Set up the connection string (replace with your actual connection details)
+$connectionString = "Server=YourServer;Database=YourDatabase;Integrated Security=True;"
+
+# Run the SQL query and store the results in a variable
+$results = Invoke-Sqlcmd -Query $sqlQuery -ConnectionString $connectionString
 
 # Filter files based on SuppliedDate being after '2023-01-01'
-$filteredFiles = $data | Where-Object { $_.SuppliedDate -gt '2023-01-01' }
+$filteredFiles = $results | Where-Object { $_.SuppliedDate -gt '2023-01-01' }
 
 # Display the filtered files
 $filteredFiles | Format-Table -AutoSize
