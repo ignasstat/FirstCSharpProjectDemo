@@ -28,14 +28,34 @@ WHERE FileExists = 'Y'
 AND CHARINDEX('\CallTrace\', Folder) > 0
 "@
 
-# Set up the connection string (replace with your actual connection details)
-$connectionString = "Server=YourServer;Database=YourDatabase;Integrated Security=True;"
+# Set up your SQL connection details
+$server = "YourServer"
+$database = "YourDatabase"
+$connectionString = "Server=$server;Database=$database;Integrated Security=True;"
 
-# Run the SQL query and store the results in a variable
-$results = Invoke-Sqlcmd -Query $sqlQuery -ConnectionString $connectionString
+# Create a SQL connection
+$sqlConnection = New-Object System.Data.SqlClient.SqlConnection
+$sqlConnection.ConnectionString = $connectionString
+$sqlConnection.Open()
+
+# Create a SQL command
+$sqlCommand = $sqlConnection.CreateCommand()
+$sqlCommand.CommandText = $sqlQuery
+
+# Create a data adapter
+$dataAdapter = New-Object System.Data.SqlClient.SqlDataAdapter $sqlCommand
+
+# Create a dataset to store the results
+$dataSet = New-Object System.Data.DataSet
+
+# Fill the dataset with the results
+$dataAdapter.Fill($dataSet) | Out-Null
+
+# Close the SQL connection
+$sqlConnection.Close()
 
 # Filter files based on SuppliedDate being after '2023-01-01'
-$filteredFiles = $results | Where-Object { $_.SuppliedDate -gt '2023-01-01' }
+$filteredFiles = $dataSet.Tables[0] | Where-Object { $_.SuppliedDate -gt '2023-01-01' }
 
 # Display the filtered files
 $filteredFiles | Format-Table -AutoSize
