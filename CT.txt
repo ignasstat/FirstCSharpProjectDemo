@@ -1,36 +1,14 @@
 # Define your SQL query
 $sqlQuery = @"
-SELECT 
-	 FileID
-	,'E' AS [Source]
-	,Folder
-	,[FileName]
-	,CreatedDate
-	,UpdatedDate
-	,Supplieddate
-	,FileSize,
-	FileExists
-FROM xxx sfd
-WHERE FileExists = 'Y'
-UNION
-SELECT 
-	 DataIn_FileId
-	,'I' AS [Source]
-	,Folder
-	,[Filename]
-	,CreatedDate
-	,UpdatedDate
-	,SuppliedDate
-	,FileSize,
-	FileExists
-FROM yyy
-WHERE FileExists = 'Y'
-AND CHARINDEX('\CallTrace\', Folder) > 0
+select [FileFullPath]
+      ,[FilePresant]
+      ,[UpdatedDate] from CT_TestIgnas 
 "@
 
+
 # Set up your SQL connection details
-$server = "YourServer"
-$database = "YourDatabase"
+$server = "xxxxxxxx"
+$database = "yyyyyyyyy"
 $connectionString = "Server=$server;Database=$database;Integrated Security=True;"
 
 # Create a SQL connection
@@ -55,7 +33,7 @@ $dataAdapter.Fill($dataSet) | Out-Null
 $sqlConnection.Close()
 
 # Filter files based on SuppliedDate being after '2023-01-01'
-$filteredFiles = $dataSet.Tables[0] | Where-Object { $_.SuppliedDate -gt '2023-01-01' }
+$filteredFiles = $dataSet.Tables[0] 
 
 # Display the filtered files
 $filteredFiles | Format-Table -AutoSize
