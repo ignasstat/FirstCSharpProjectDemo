@@ -1,6 +1,6 @@
 # Set up your SQL connection details
-$server = "xxxxxxxx"
-$database = "yyyyyyyyy"
+$server = "PLLWINPPSQL001\MB21,1433"
+$database = "DataBureauDataLoadAudit"
 $connectionString = "Server=$server;Database=$database;Integrated Security=True;"
 
 # Define your SQL query
@@ -50,3 +50,19 @@ $sqlConnection.Close()
 
 # Display the updated data
 $dataSet.Tables[0] | Format-Table -AutoSize
+
+
+Exception calling "Fill" with "1" argument(s): "Invalid column name 'FilePresent'."
+At line:30 char:1
++ $dataAdapter.Fill($dataSet) | Out-Null
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : SqlException
+ 
+Exception calling "Update" with "1" argument(s): "Update unable to find TableMapping['Table'] or DataTable 'Table'."
+At line:46 char:1
++ $dataAdapter.Update($dataSet)
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : InvalidOperationException
+ 
