@@ -1,29 +1,27 @@
-select top 1000 
-	CASE WHEN COUNT(JN.Job_Number) = 0 THEN 'No Matches' 
-	WHEN COUNT(JN.Job_Number) > 1 THEN 'Multiple Matches' 
-	ELSE MAX(JN.Job_Number) 
-END AS Job_Number,
-	v.fileid, 
-	v.Source, 
-	Folder,
-	v.filename,
-	format(v.Supplieddate, 'yyyy-MM-dd HH:mm') as ReceivedDate,
-	v.filesize 
-from xxx v
-left join yyy r
-	on r.fileID = v.FileID and r.FileSource = v.Source and r.UnRejectedDate is null
-left join zzz JR
-	on jr.fileID = v.FileID and jr.FileSource = v.Source 
-full outer join llll JN
-		on jn.InboundFolder = Folder and v.FileName like jn.InboundFileSpec
-where r.fileid is null and jr.fileid is null
-GROUP BY 
-	v.fileid, 
-	v.Source, 
-	Folder, 
-	v.filename, 
-	v.createddate, 
-	v.updateddate, 
-	v.Supplieddate, 
-	v.filesize 
-ORDER BY Updateddate;
+SELECT 
+	 FileID
+	,'E' AS [Source]
+	,Folder
+	,[FileName]
+	,CreatedDate
+	,UpdatedDate
+	,Supplieddate
+	,FileSize,
+	FileExists
+FROM xxx sfd
+WHERE FileExists = 'Y'
+UNION
+SELECT 
+	 DataIn_FileId
+	,'I' AS [Source]
+	,Folder
+	,[Filename]
+	,CreatedDate
+	,UpdatedDate
+	,SuppliedDate
+	,FileSize,
+	FileExists
+FROM yyy
+WHERE FileExists = 'Y'
+
+AND CHARINDEX('\CallTrace\', Folder) > 0
