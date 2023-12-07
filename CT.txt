@@ -1,15 +1,15 @@
-# Define your SQL query
-$sqlQuery = @"
-select [FileFullPath]
-      ,[FilePresant]
-      ,[UpdatedDate] from CT_TestIgnas 
-"@
-
-
 # Set up your SQL connection details
 $server = "xxxxxxxx"
 $database = "yyyyyyyyy"
 $connectionString = "Server=$server;Database=$database;Integrated Security=True;"
+
+# Define your SQL query
+$sqlQuery = @"
+SELECT [FileFullPath]
+      ,[FilePresent]
+      ,[UpdatedDate]
+FROM CT_TestIgnas
+"@
 
 # Create a SQL connection
 $sqlConnection = New-Object System.Data.SqlClient.SqlConnection
@@ -29,11 +29,24 @@ $dataSet = New-Object System.Data.DataSet
 # Fill the dataset with the results
 $dataAdapter.Fill($dataSet) | Out-Null
 
+# Loop through each row in the dataset
+foreach ($row in $dataSet.Tables[0].Rows) {
+    $filePath = $row["FileFullPath"]
+    $fileExists = Test-Path $filePath
+
+    # Update the FilePresent column based on file existence
+    if ($fileExists) {
+        $row["FilePresent"] = "Y"
+    } else {
+        $row["FilePresent"] = "N"
+    }
+}
+
+# Update the changes back to the database
+$dataAdapter.Update($dataSet)
+
 # Close the SQL connection
 $sqlConnection.Close()
 
-# Filter files based on SuppliedDate being after '2023-01-01'
-$filteredFiles = $dataSet.Tables[0] 
-
-# Display the filtered files
-$filteredFiles | Format-Table -AutoSize
+# Display the updated data
+$dataSet.Tables[0] | Format-Table -AutoSize
