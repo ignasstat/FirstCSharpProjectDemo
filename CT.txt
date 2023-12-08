@@ -1,68 +1,56 @@
 # Set up your SQL connection details
-$server = "PLLWINPPSQL001\MB21,1433"
-$database = "DataBureauDataLoadAudit"
+$server = "xxxxxxxx"
+$database = "yyyyyyyyy"
 $connectionString = "Server=$server;Database=$database;Integrated Security=True;"
 
-# Define your SQL query
-$sqlQuery = @"
-SELECT [FileFullPath]
-      ,[FilePresent]
-      ,[UpdatedDate]
-FROM CT_TestIgnas
-"@
+# Specify the path for the transcript file
+$transcriptPath = "C:\Path\To\Your\Transcript.log"
+
+# Start transcript logging
+Start-Transcript -Path $transcriptPath
 
 # Create a SQL connection
 $sqlConnection = New-Object System.Data.SqlClient.SqlConnection
 $sqlConnection.ConnectionString = $connectionString
-$sqlConnection.Open()
 
-# Create a SQL command
-$sqlCommand = $sqlConnection.CreateCommand()
-$sqlCommand.CommandText = $sqlQuery
+try {
+    $sqlConnection.Open()
 
-# Create a data adapter
-$dataAdapter = New-Object System.Data.SqlClient.SqlDataAdapter $sqlCommand
+    # Loop through each row in the dataset
+    foreach ($row in $dataSet.Tables[0].Rows) {
+        $filePath = $row["FileFullPath"]
+        $fileExists = Test-Path $filePath
 
-# Create a dataset to store the results
-$dataSet = New-Object System.Data.DataSet
+        # Determine the value for FilePresent
+        $filePresentValue = if ($fileExists) { 'Y' } else { 'N' }
 
-# Fill the dataset with the results
-$dataAdapter.Fill($dataSet) | Out-Null
+        # Create a SQL command to update the 'FilePresent' column in the database
+        $updateCommandText = "UPDATE CT_TestIgnas SET FilePresent = '$filePresentValue' WHERE FileFullPath = '$filePath'"
+        $updateCommand = $sqlConnection.CreateCommand()
+        $updateCommand.CommandText = $updateCommandText
 
-# Loop through each row in the dataset
-foreach ($row in $dataSet.Tables[0].Rows) {
-    $filePath = $row["FileFullPath"]
-    $fileExists = Test-Path $filePath
-
-    # Update the FilePresent column based on file existence
-    if ($fileExists) {
-        $row["FilePresent"] = "Y"
-    } else {
-        $row["FilePresent"] = "N"
+        try {
+            # Execute the update command
+            $updateCommand.ExecuteNonQuery() | Out-Null
+            Write-Host "Update successful for file: $filePath"
+        } catch {
+            Write-Host "Error updating file: $filePath. Error: $_"
+            # Log the error to the transcript file
+            "$($_.Exception.Message)`r`n" | Out-File -Append -FilePath $transcriptPath
+        }
     }
+} catch {
+    Write-Host "Error opening SQL connection. Error: $_"
+    # Log the error to the transcript file
+    "$($_.Exception.Message)`r`n" | Out-File -Append -FilePath $transcriptPath
+} finally {
+    # Close the SQL connection
+    $sqlConnection.Close()
+    Write-Host "SQL connection closed."
+
+    # Stop transcript logging
+    Stop-Transcript
 }
-
-# Update the changes back to the database
-$dataAdapter.Update($dataSet)
-
-# Close the SQL connection
-$sqlConnection.Close()
 
 # Display the updated data
 $dataSet.Tables[0] | Format-Table -AutoSize
-
-
-Exception calling "Fill" with "1" argument(s): "Invalid column name 'FilePresent'."
-At line:30 char:1
-+ $dataAdapter.Fill($dataSet) | Out-Null
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
-    + FullyQualifiedErrorId : SqlException
- 
-Exception calling "Update" with "1" argument(s): "Update unable to find TableMapping['Table'] or DataTable 'Table'."
-At line:46 char:1
-+ $dataAdapter.Update($dataSet)
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
-    + FullyQualifiedErrorId : InvalidOperationException
- 
