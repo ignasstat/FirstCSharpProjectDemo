@@ -1,3 +1,9 @@
+# Specify the path for the transcript file
+$transcriptPath = "C:\Path\To\Your\Transcript.log"
+
+# Start transcript logging
+Start-Transcript -Path $transcriptPath
+
 # SQL connection details
 $server = "xxxx"
 $database = "yyyyyyy"
@@ -47,17 +53,22 @@ try {
             Write-Host "Update successful for file: $FileName"
         } catch {
             Write-Host "Error updating file: $FileName. Error: $_"
-            # Log the error to a transcript file or handle it as needed
+            # Log the error to the transcript file
+            "$($_.Exception.Message)`r`n" | Out-File -Append -FilePath $transcriptPath
         }
     }
 } catch {
     Write-Host "Error opening SQL connection. Error: $_"
-    # Log the error to a transcript file or handle it as needed
+    # Log the error to the transcript file
+    "$($_.Exception.Message)`r`n" | Out-File -Append -FilePath $transcriptPath
 } finally {
     # Close the SQL connection
     $sqlConnection.Close()
     Write-Host "SQL connection closed."
 }
+
+# Stop transcript logging
+Stop-Transcript
 
 # Display the updated data
 $dataSet.Tables[0] | Format-Table -AutoSize
