@@ -1,56 +1,50 @@
-# Set up your SQL connection details
-$server = "xxxxxxxx"
-$database = "yyyyyyyyy"
+# SQL connection details
+$server = "xxxx"
+$database = "yyyyyyy"
 $connectionString = "Server=$server;Database=$database;Integrated Security=True;"
 
-# Specify the path for the transcript file
-$transcriptPath = "C:\Path\To\Your\Transcript.log"
+$sqlQuery = @"
+SELECT TOP (1000) [FilePresant]
+      ,[UpdatedDate]
+      ,[Folder]
+      ,[FileName]
+  FROM llll
+  where UpdatedDate > '2023-01-01'
+"@
 
-# Start transcript logging
-Start-Transcript -Path $transcriptPath
-
-# Create a SQL connection
 $sqlConnection = New-Object System.Data.SqlClient.SqlConnection
 $sqlConnection.ConnectionString = $connectionString
+$sqlConnection.Open()
 
-try {
-    $sqlConnection.Open()
+$sqlCommand = $sqlConnection.CreateCommand()
+$sqlCommand.CommandText = $sqlQuery
 
-    # Loop through each row in the dataset
-    foreach ($row in $dataSet.Tables[0].Rows) {
-        $filePath = $row["FileFullPath"]
-        $fileExists = Test-Path $filePath
+$dataAdapter = New-Object System.Data.SqlClient.SqlDataAdapter $sqlCommand
 
-        # Determine the value for FilePresent
-        $filePresentValue = if ($fileExists) { 'Y' } else { 'N' }
+$dataSet = New-Object System.Data.DataSet
 
-        # Create a SQL command to update the 'FilePresent' column in the database
-        $updateCommandText = "UPDATE CT_TestIgnas SET FilePresent = '$filePresentValue' WHERE FileFullPath = '$filePath'"
-        $updateCommand = $sqlConnection.CreateCommand()
-        $updateCommand.CommandText = $updateCommandText
+$dataAdapter.Fill($dataSet) | Out-Null
 
-        try {
-            # Execute the update command
-            $updateCommand.ExecuteNonQuery() | Out-Null
-            Write-Host "Update successful for file: $filePath"
-        } catch {
-            Write-Host "Error updating file: $filePath. Error: $_"
-            # Log the error to the transcript file
-            "$($_.Exception.Message)`r`n" | Out-File -Append -FilePath $transcriptPath
-        }
-    }
-} catch {
-    Write-Host "Error opening SQL connection. Error: $_"
-    # Log the error to the transcript file
-    "$($_.Exception.Message)`r`n" | Out-File -Append -FilePath $transcriptPath
-} finally {
-    # Close the SQL connection
-    $sqlConnection.Close()
-    Write-Host "SQL connection closed."
 
-    # Stop transcript logging
-    Stop-Transcript
+# Loop through each row in the dataset and update values in a sql table
+foreach ($row in $dataSet.Tables[0].Rows) {
+    $FileName = $row["FileName"]
+    $FolderName = $row["Folder"]
+    $filePath = $row["Folder"]+$row["FileName"]
+    $fileExists = Test-Path $filePath
+  
+    #$filePresantValue = 'Q'
+    $filePresantValue = if ($fileExists) {'Y'} else {'N'}
+
+    $updateTableCommand = "update CT_TestIgnas set FilePresant = '$filePresantValue' where FileName = '$FileName'"
+    $updateCommand = $sqlConnection.CreateCommand()
+    $updateCommand.CommandText = $updateTableCommand
+
+    $updateCommand.ExecuteNonQuery() | Out-Null
 }
 
-# Display the updated data
-$dataSet.Tables[0] | Format-Table -AutoSize
+
+# Close the SQL connection
+$sqlConnection.Close()
+
+
