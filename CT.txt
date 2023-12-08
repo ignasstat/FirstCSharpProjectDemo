@@ -8,43 +8,56 @@ SELECT TOP (1000) [FilePresant]
       ,[UpdatedDate]
       ,[Folder]
       ,[FileName]
-  FROM llll
-  where UpdatedDate > '2023-01-01'
+FROM llll
+WHERE UpdatedDate > '2023-01-01'
 "@
 
 $sqlConnection = New-Object System.Data.SqlClient.SqlConnection
 $sqlConnection.ConnectionString = $connectionString
-$sqlConnection.Open()
 
-$sqlCommand = $sqlConnection.CreateCommand()
-$sqlCommand.CommandText = $sqlQuery
+try {
+    $sqlConnection.Open()
 
-$dataAdapter = New-Object System.Data.SqlClient.SqlDataAdapter $sqlCommand
+    $sqlCommand = $sqlConnection.CreateCommand()
+    $sqlCommand.CommandText = $sqlQuery
 
-$dataSet = New-Object System.Data.DataSet
+    $dataAdapter = New-Object System.Data.SqlClient.SqlDataAdapter $sqlCommand
 
-$dataAdapter.Fill($dataSet) | Out-Null
+    $dataSet = New-Object System.Data.DataSet
 
+    $dataAdapter.Fill($dataSet) | Out-Null
 
-# Loop through each row in the dataset and update values in a sql table
-foreach ($row in $dataSet.Tables[0].Rows) {
-    $FileName = $row["FileName"]
-    $FolderName = $row["Folder"]
-    $filePath = $row["Folder"]+$row["FileName"]
-    $fileExists = Test-Path $filePath
-  
-    #$filePresantValue = 'Q'
-    $filePresantValue = if ($fileExists) {'Y'} else {'N'}
+    # Loop through each row in the dataset and update values in a SQL table
+    foreach ($row in $dataSet.Tables[0].Rows) {
+        $FileName = $row["FileName"]
+        $FolderName = $row["Folder"]
+        $filePath = $row["Folder"] + $row["FileName"]
+        $fileExists = Test-Path $filePath
 
-    $updateTableCommand = "update CT_TestIgnas set FilePresant = '$filePresantValue' where FileName = '$FileName'"
-    $updateCommand = $sqlConnection.CreateCommand()
-    $updateCommand.CommandText = $updateTableCommand
+        # Determine the value for FilePresant
+        $filePresentValue = if ($fileExists) {'Y'} else {'N'}
 
-    $updateCommand.ExecuteNonQuery() | Out-Null
+        $updateTableCommand = "UPDATE CT_TestIgnas SET FilePresant = '$filePresentValue' WHERE FileName = '$FileName'"
+        $updateCommand = $sqlConnection.CreateCommand()
+        $updateCommand.CommandText = $updateTableCommand
+
+        try {
+            # Execute the update command
+            $updateCommand.ExecuteNonQuery() | Out-Null
+            Write-Host "Update successful for file: $FileName"
+        } catch {
+            Write-Host "Error updating file: $FileName. Error: $_"
+            # Log the error to a transcript file or handle it as needed
+        }
+    }
+} catch {
+    Write-Host "Error opening SQL connection. Error: $_"
+    # Log the error to a transcript file or handle it as needed
+} finally {
+    # Close the SQL connection
+    $sqlConnection.Close()
+    Write-Host "SQL connection closed."
 }
 
-
-# Close the SQL connection
-$sqlConnection.Close()
-
-
+# Display the updated data
+$dataSet.Tables[0] | Format-Table -AutoSize
