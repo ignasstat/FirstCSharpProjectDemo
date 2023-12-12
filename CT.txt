@@ -3,14 +3,13 @@ $server = "YourServer"
 $database = "YourDatabase"
 $connectionString = "Server=$server;Database=$database;Integrated Security=True;"
 
-# SQL query to retrieve data from xxxxx
+# SQL query to retrieve data from the table
 $sqlQuery = @"
 SELECT [FileID]
       ,[Folder]
       ,[FileName]
       ,[FileExists]
-FROM xxxxx
-WHERE YEAR(SuppliedDate) = 2023 AND FileExists = 'Y'
+FROM YourTableName
 "@
 
 # Create a SQL connection
@@ -33,94 +32,13 @@ try {
     # Fill the dataset with the results
     $dataAdapter.Fill($dataSet) | Out-Null
 
-    # Create a list to store the results
-    $fileDetailsList = @()
+    # Specify the path to export the data
+    $exportPath = "C:\Path\To\Your\ExportedData.csv"
 
-    # Loop through each row in the dataset
-    foreach ($row in $dataSet.Tables[0].Rows) {
-        $fileDetails = [PSCustomObject]@{
-            FileID     = $row["FileID"]
-            Folder     = $row["Folder"]
-            FileName   = $row["FileName"]
-            FileExists = $row["FileExists"]
-        }
+    # Export the data to a CSV file
+    $dataSet.Tables[0] | Export-Csv -Path $exportPath -NoTypeInformation
 
-        # Check if the file exists based on Folder and FileName
-        $filePath = Join-Path -Path $fileDetails.Folder -ChildPath $fileDetails.FileName
-        $fileExists = Test-Path $filePath
-
-        # Update the FileExists value in the list
-        if (-not $fileExists) {
-            $fileDetails.FileExists = "N"
-        }
-
-        # Add the file details to the list
-        $fileDetailsList += $fileDetails
-    }
-
-    # Display the updated file details list
-    $fileDetailsList | Format-Table -AutoSize
-
-    # Export the file details list to a CSV file
-    $fileDetailsList | Export-Csv -Path "C:\Path\To\Your\FileDetailsList.csv" -NoTypeInformation
-
-} catch {
-    Write-Host "Error: $_"
-} finally {
-    # Close the SQL connection
-    $sqlConnection.Close()
-    Write-Host "SQL connection closed."
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Specify the path to the exported CSV file
-$csvFilePath = "C:\Path\To\Your\FileDetailsList.csv"
-
-# SQL connection details
-$server = "YourServer"
-$database = "YourDatabase"
-$connectionString = "Server=$server;Database=$database;Integrated Security=True;"
-
-# Create a SQL connection
-$sqlConnection = New-Object System.Data.SqlClient.SqlConnection
-$sqlConnection.ConnectionString = $connectionString
-
-try {
-    $sqlConnection.Open()
-
-    # Read the CSV file into a PowerShell object
-    $fileDetailsList = Import-Csv -Path $csvFilePath
-
-    # Loop through each entry in the list and update the SQL table
-    foreach ($fileDetails in $fileDetailsList) {
-        $fileID = $fileDetails.FileID
-        $fileExists = $fileDetails.FileExists
-
-        # Create a SQL command to update the 'FileExists' column in the SQL table
-        $updateCommandText = "UPDATE xxxxx SET FileExists = '$fileExists' WHERE FileID = '$fileID'"
-        $updateCommand = $sqlConnection.CreateCommand()
-        $updateCommand.CommandText = $updateCommandText
-
-        try {
-            # Execute the update command
-            $updateCommand.ExecuteNonQuery() | Out-Null
-            Write-Host "Update successful for FileID: $fileID"
-        } catch {
-            Write-Host "Error updating FileID: $fileID. Error: $_"
-            # Log the error or handle it as needed
-        }
-    }
+    Write-Host "Data exported successfully to: $exportPath"
 
 } catch {
     Write-Host "Error: $_"
