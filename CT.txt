@@ -47,3 +47,36 @@ try {
     $sqlConnection.Close()
     Write-Host "SQL connection closed."
 }
+
+
+
+
+
+
+
+
+
+# Specify the path to the exported CSV file
+$csvFilePath = "C:\Path\To\Your\ExportedData.csv"
+
+# Create a list to store the results
+$fileDetailsList = @()
+
+# Read the CSV file into a PowerShell object
+$fileDetailsList = Import-Csv -Path $csvFilePath
+
+# Loop through each entry in the list
+foreach ($fileDetails in $fileDetailsList) {
+    $fileID = $fileDetails.FileID
+    $filePath = Join-Path -Path $fileDetails.Folder -ChildPath $fileDetails.FileName
+    $fileExists = Test-Path $filePath
+
+    # Update the 'FileExists' value in the list
+    if (-not $fileExists) {
+        $fileDetails.FileExists = "N"
+    }
+
+    Write-Host "FileID: $fileID, FileExists: $($fileDetails.FileExists)"
+}
+
+# Optionally, update the SQL table with the new 'FileExists' values here
