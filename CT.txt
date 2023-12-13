@@ -1,45 +1,16 @@
-# Specify the path to the exported CSV file
-$csvFilePath = "C:\Path\To\Your\FileDetailsList.csv"
+Background changes:
 
-# SQL connection details
-$server = "YourServer"
-$database = "YourDatabase"
-$connectionString = "Server=$server;Database=$database;Integrated Security=True;"
+While Link Details window was removed all its functionality was transferred to Process File button in the File List tab. By doing this several functions have been removed from the code.
+Setup Job button’s functionality was also implemented in to Process File button actions. So now when you select a file and click process file button it additionally links it to a Job and Sets it up, when we have multiple or no matches with jobs for the same file then you won’t be allowed to process this file.
+PowerShell script which is being executed from EFT was updated to not only determine if a source file is present but although if it’s empty/has only header. An operator will be informed whenever file doesn’t exist or it’s empty. 
 
-# Create a SQL connection
-$sqlConnection = New-Object System.Data.SqlClient.SqlConnection
-$sqlConnection.ConnectionString = $connectionString
+SQL Database required, tables and views were updated in order to files received via SFTP into a CallTrace folder, but which don’t match to an existing Job, to be also added to the File List in the console.
+After DPP job was not allowed to be launched due to falsely flagged as CRL environment as disabled, there was updated SQL stored procedure which now takes values from up to date table.
 
-try {
-    $sqlConnection.Open()
+Visual updates:
 
-    # Read the CSV file into a PowerShell object
-    $fileDetailsList = Import-Csv -Path $csvFilePath
+Table in filelist window now is showing Job_Number, No Matches Or Multiple Matches for a file. Folder column was removed, CreatedDate and UpdatedDate columns were replaced by ReceivedDate(Supplied date) column widths were updated accordingly.
 
-    # Loop through each entry in the list and update the SQL table
-    foreach ($fileDetails in $fileDetailsList) {
-        $fileID = $fileDetails.FileID
-        $fileExists = $fileDetails.FileExists
-
-        # Create a SQL command to update the 'FileExists' column in the SQL table
-        $updateCommandText = "UPDATE xxxxx SET FileExists = '$fileExists' WHERE FileID = '$fileID'"
-        $updateCommand = $sqlConnection.CreateCommand()
-        $updateCommand.CommandText = $updateCommandText
-
-        try {
-            # Execute the update command
-            $updateCommand.ExecuteNonQuery() | Out-Null
-            Write-Host "Update successful for FileID: $fileID"
-        } catch {
-            Write-Host "Error updating FileID: $fileID. Error: $_"
-            # Log the error or handle it as needed
-        }
-    }
-
-} catch {
-    Write-Host "Error: $_"
-} finally {
-    # Close the SQL connection
-    $sqlConnection.Close()
-    Write-Host "SQL connection closed."
-}
+On Active Jobs window RunID column now is wider as after we crossed 100 000 RunIDs a number didn’t fit in the column.
+Link Details window was removed entirely
+From Job Detail’s window Setup Job button was removed 
