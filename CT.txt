@@ -14,3 +14,33 @@ Table in filelist window now is showing Job_Number, No Matches Or Multiple Match
 On Active Jobs window RunID column now is wider as after we crossed 100 000 RunIDs a number didn’t fit in the column.
 Link Details window was removed entirely
 From Job Detail’s window Setup Job button was removed 
+
+
+
+
+Background Changes:
+
+With the removal of the Link Details window, all its functionality has been transferred to the Process File button in the File List tab. As a result, several functions were removed from the code.
+
+The functionality of the Setup Job button has also been integrated into the actions of the Process File button. Now, when you select a file and click the Process File button, it not only links the file to a job but also sets it up. In cases where there are multiple or no matches with jobs for the same file, processing this file is not allowed.
+
+The PowerShell script executed from EFT has been updated to not only determine the presence of a source file but also to check if it is empty or contains only a header. Operators will be notified whenever a file doesn’t exist or is empty.
+
+For the SQL Database requirements, tables and views were updated to include files received via SFTP into a CallTrace folder that doesn't match an existing job. These files are now also added to the File List in the console.
+
+After a DPP job was erroneously flagged as a disabled CRL environment, an SQL stored procedure was updated to retrieve values from an up-to-date table.
+
+Visual Updates:
+
+In the File List window table, the columns now display Job_Number, No Matches, or Multiple Matches for a file. The Folder column was removed, and the CreatedDate and UpdatedDate columns were replaced by the ReceivedDate (Supplied date), with column widths updated accordingly.
+
+In the Active Jobs window, the RunID column is now wider to accommodate numbers beyond 100,000.
+
+The Link Details window has been entirely removed.
+
+From the Job Details window, the Setup Job button was removed.
+
+
+
+
+
