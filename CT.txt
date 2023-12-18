@@ -1,3 +1,48 @@
-Imagine the case of someone supervising an exceptional team of workers, all of them striving towards a collectively held goal; imagine them hard-working, brilliant, creative, and unified. 
-But the person supervising is also responsible for someone troubled, who is performing poorly, elsewhere. In a fit of inspiration, the well-meaning manager moves that problematic person into the midst of his stellar team, hoping to improve him by example. What happens? -- and the psychological literature is clear on this point. Does the errant interloper immediately straighten up and fly right?
-No. Instead, the entire team degenerates. The newcomer remains cynical, arrogant, and neurotic. He complains. He shirks. He misses important meetings. His low-quality work causes delays and must be redone by others. He still gets paid, however, just like his teammates. The hard workers who surround him start to feel betrayed. "Why am I breaking myself into pieces striving to finish this project," each thinks, "when my new team member never breaks a sweat?" The same happens when a well-meaning counsellors place a delinquent teen among comparatively civilized peers. The delinquency spreads, not the stability. Down is a lot easier than up
+ If Not IsNull(lstFileView.Value) Then
+        ' Job number from list
+        lngFileID = lstFileView.Value
+        blnProcess = True
+        
+        ' Job number from list
+        selectedRow = lstFileView.ListIndex
+        selectedRow = selectedRow + 1
+        JobNumber = lstFileView.Column(1, selectedRow)
+        
+        If JobNumber = "No Matches" Or JobNumber = "Multiple Matches" Then
+            blnProcess = False
+            MsgBox ("File has " & JobNumber & " with jobs")
+        End If
+
+
+
+select top 1000 
+	CASE WHEN COUNT(JN.Job_Number) = 0 THEN 'No Matches' 
+	WHEN COUNT(JN.Job_Number) > 1 THEN 'Multiple Matches' 
+	ELSE MAX(JN.Job_Number) 
+END AS Job_Number,
+	v.fileid, 
+	v.Source, 
+	Folder,
+	v.filename,
+	format(v.Supplieddate, 'yyyy-MM-dd HH:mm') as ReceivedDate,
+	v.filesize,
+	JR.RunStatus
+from dbo.xx v
+left join dbo.xxxx r
+	on r.fileID = v.FileID and r.FileSource = v.Source and r.UnRejectedDate is null
+left join dbo.CT_JobRun JR
+	on jr.fileID = v.FileID and jr.FileSource = v.Source 
+full outer join dbo.xxx JN
+		on jn.InboundFolder = Folder and v.FileName like jn.InboundFileSpec
+where r.fileid is null and jr.fileid is null and v.FileID is not null
+GROUP BY 
+	v.fileid, 
+	v.Source, 
+	Folder, 
+	v.filename, 
+	v.createddate, 
+	v.updateddate, 
+	v.Supplieddate, 
+	v.filesize,
+	JR.RunStatus
+ORDER BY Updateddate;
