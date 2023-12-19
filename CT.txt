@@ -1,20 +1,3 @@
- If Not IsNull(lstFileView.Value) Then
-        ' Job number from list
-        lngFileID = lstFileView.Value
-        blnProcess = True
-        
-        ' Job number from list
-        selectedRow = lstFileView.ListIndex
-        selectedRow = selectedRow + 1
-        JobNumber = lstFileView.Column(1, selectedRow)
-        
-        If JobNumber = "No Matches" Or JobNumber = "Multiple Matches" Then
-            blnProcess = False
-            MsgBox ("File has " & JobNumber & " with jobs")
-        End If
-
-
-
 select top 1000 
 	CASE WHEN COUNT(JN.Job_Number) = 0 THEN 'No Matches' 
 	WHEN COUNT(JN.Job_Number) > 1 THEN 'Multiple Matches' 
@@ -22,17 +5,24 @@ select top 1000
 END AS Job_Number,
 	v.fileid, 
 	v.Source, 
+	cast(Replace(Replace(Replace(Replace(Replace(Replace(v.Folder, '\\cig.local\Data\Marketing Solutions Departments\Production\Data In\','<Data In>\'),
+		'\\cig.local\Data\Marketing Solutions Departments\Production\Public\DataTransfer\Inbound\FromClientManagement\calltrace\','<Internal CMT>\'), 
+		'\\cig.local\Data\Marketing Solutions Departments\Production\Public\DataTransfer\Inbound\FromDOTO\calltrace\','<Internal DOTO>\'), 
+		'\\cig.local\Data\Marketing Solutions Departments\Production\Neptune\CallTrace\InTouch\','<InTouch>\'), 
+		'\\cig.local\Data\Marketing Solutions Departments\Production\Public\DataTransfer\InBound\FromSDQ\CallTrace','<Internal SDQ>\'),
+		'\\cig.local\data\AppData\SFTP\Data\Usr\Credit\','<EFT>\')
+		as varchar(255))
 	Folder,
 	v.filename,
 	format(v.Supplieddate, 'yyyy-MM-dd HH:mm') as ReceivedDate,
 	v.filesize,
-	JR.RunStatus
-from dbo.xx v
-left join dbo.xxxx r
+	IIF(JR.RunStatus IN ('Pre-Processing', 'Check Job'), False, True) as NewColumn
+from dbo.vw_ExistingFiles_New v
+left join dbo.CT_RejectedFiles r
 	on r.fileID = v.FileID and r.FileSource = v.Source and r.UnRejectedDate is null
 left join dbo.CT_JobRun JR
 	on jr.fileID = v.FileID and jr.FileSource = v.Source 
-full outer join dbo.xxx JN
+full outer join dbo.vw_CallTraceJobList JN
 		on jn.InboundFolder = Folder and v.FileName like jn.InboundFileSpec
 where r.fileid is null and jr.fileid is null and v.FileID is not null
 GROUP BY 
@@ -43,6 +33,5 @@ GROUP BY
 	v.createddate, 
 	v.updateddate, 
 	v.Supplieddate, 
-	v.filesize,
-	JR.RunStatus
+	v.filesize
 ORDER BY Updateddate;
