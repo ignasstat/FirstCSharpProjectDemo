@@ -35,3 +35,18 @@ GROUP BY
 	v.Supplieddate, 
 	v.filesize
 ORDER BY Updateddate;
+
+
+
+
+
+
+
+Msg 207, Level 16, State 1, Line 39
+Invalid column name 'False'.
+Msg 207, Level 16, State 1, Line 39
+Invalid column name 'True'.
+Msg 8120, Level 16, State 1, Line 39
+Column 'dbo.CT_JobRun.RunStatus' is invalid in the select list because it is not contained in either an aggregate function or the GROUP BY clause.
+Msg 8120, Level 16, State 1, Line 39
+Column 'dbo.CT_JobRun.RunStatus' is invalid in the select list because it is not contained in either an aggregate function or the GROUP BY clause.
