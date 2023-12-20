@@ -2,27 +2,33 @@ WITH RunStatusForJobs AS (
     SELECT
         CT_JobID,
         RunStatus,
-        highestrownum
-    FROM (
-        SELECT
-            CT_JobID,
-            RunStatus,
-            ROW_NUMBER() OVER (PARTITION BY CT_JobID, RunStatus ORDER BY RunNo DESC) AS highestrownum
-        FROM
-            dbo.CT_JobRun
-    ) RankedResults
-    WHERE
-        highestrownum = 1
+        MAX(RunNo) AS highestrownum
+    FROM
+        dbo.CT_JobRun
+    GROUP BY
+        CT_JobID,
+        RunStatus
+),
+RankedResults AS (
+    SELECT
+        YT.FileID,
+        RS.CT_JobID,
+        RS.highestrownum,
+        RS.RunStatus,
+        ROW_NUMBER() OVER (PARTITION BY RS.CT_JobID ORDER BY RS.highestrownum DESC) AS RowNum
+    FROM
+        dbo.CT_JobRun YT
+    LEFT JOIN
+        RunStatusForJobs RS ON RS.CT_JobID = YT.CT_JobID AND RS.RunStatus = YT.RunStatus
 )
-
 SELECT
-    YT.FileID,
-    RS.CT_JobID,
-    RS.highestrownum,
-    RS.RunStatus
+    FileID,
+    CT_JobID,
+    highestrownum,
+    RunStatus
 FROM
-    dbo.CT_JobRun YT
-LEFT JOIN
-    RunStatusForJobs RS ON RS.CT_JobID = YT.CT_JobID AND RS.RunStatus = YT.RunStatus
+    RankedResults
+WHERE
+    RowNum = 1
 ORDER BY
-    RS.CT_JobID DESC;
+    CT_JobID DESC;
