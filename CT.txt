@@ -1,52 +1,13 @@
-select top 1000 
-	CASE WHEN COUNT(JN.Job_Number) = 0 THEN 'No Matches' 
-	WHEN COUNT(JN.Job_Number) > 1 THEN 'Multiple Matches' 
-	ELSE MAX(JN.Job_Number) 
-END AS Job_Number,
-	v.fileid, 
-	v.Source, 
-	cast(Replace(Replace(Replace(Replace(Replace(Replace(v.Folder, '\\cig.local\Data\Marketing Solutions Departments\Production\Data In\','<Data In>\'),
-		'\\cig.local\Data\Marketing Solutions Departments\Production\Public\DataTransfer\Inbound\FromClientManagement\calltrace\','<Internal CMT>\'), 
-		'\\cig.local\Data\Marketing Solutions Departments\Production\Public\DataTransfer\Inbound\FromDOTO\calltrace\','<Internal DOTO>\'), 
-		'\\cig.local\Data\Marketing Solutions Departments\Production\Neptune\CallTrace\InTouch\','<InTouch>\'), 
-		'\\cig.local\Data\Marketing Solutions Departments\Production\Public\DataTransfer\InBound\FromSDQ\CallTrace','<Internal SDQ>\'),
-		'\\cig.local\data\AppData\SFTP\Data\Usr\Credit\','<EFT>\')
-		as varchar(255))
-	Folder,
-	v.filename,
-	format(v.Supplieddate, 'yyyy-MM-dd HH:mm') as ReceivedDate,
-	v.filesize,
-	IIF(JR.RunStatus IN ('Pre-Processing', 'Check Job'), False, True) as NewColumn
-from dbo.vw_ExistingFiles_New v
-left join dbo.CT_RejectedFiles r
-	on r.fileID = v.FileID and r.FileSource = v.Source and r.UnRejectedDate is null
-left join dbo.CT_JobRun JR
-	on jr.fileID = v.FileID and jr.FileSource = v.Source 
-full outer join dbo.vw_CallTraceJobList JN
-		on jn.InboundFolder = Folder and v.FileName like jn.InboundFileSpec
-where r.fileid is null and jr.fileid is null and v.FileID is not null
-GROUP BY 
-	v.fileid, 
-	v.Source, 
-	Folder, 
-	v.filename, 
-	v.createddate, 
-	v.updateddate, 
-	v.Supplieddate, 
-	v.filesize
-ORDER BY Updateddate;
+with RunStatusForJobs AS (
+select CT_JobID, RunStatus, MAX(RunNo) as highestrownum
+from dbo.CT_JobRun
+group by CT_JobID, RunStatus
+)
 
-
-
-
-
-
-
-Msg 207, Level 16, State 1, Line 39
-Invalid column name 'False'.
-Msg 207, Level 16, State 1, Line 39
-Invalid column name 'True'.
-Msg 8120, Level 16, State 1, Line 39
-Column 'dbo.CT_JobRun.RunStatus' is invalid in the select list because it is not contained in either an aggregate function or the GROUP BY clause.
-Msg 8120, Level 16, State 1, Line 39
-Column 'dbo.CT_JobRun.RunStatus' is invalid in the select list because it is not contained in either an aggregate function or the GROUP BY clause.
+select YT.FileID,
+RS.CT_JobID,
+RS.highestrownum,
+RS.RunStatus
+from dbo.CT_JobRun YT 
+left join  RunStatusForJobs RS ON RS.CT_JobID = YT.CT_JobID and RS.RunStatus = YT.RunStatus
+order by RS.CT_JobID desc
