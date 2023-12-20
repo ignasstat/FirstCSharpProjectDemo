@@ -1,13 +1,28 @@
-with RunStatusForJobs AS (
-select CT_JobID, RunStatus, MAX(RunNo) as highestrownum
-from dbo.CT_JobRun
-group by CT_JobID, RunStatus
+WITH RunStatusForJobs AS (
+    SELECT
+        CT_JobID,
+        RunStatus,
+        highestrownum
+    FROM (
+        SELECT
+            CT_JobID,
+            RunStatus,
+            ROW_NUMBER() OVER (PARTITION BY CT_JobID, RunStatus ORDER BY RunNo DESC) AS highestrownum
+        FROM
+            dbo.CT_JobRun
+    ) RankedResults
+    WHERE
+        highestrownum = 1
 )
 
-select YT.FileID,
-RS.CT_JobID,
-RS.highestrownum,
-RS.RunStatus
-from dbo.CT_JobRun YT 
-left join  RunStatusForJobs RS ON RS.CT_JobID = YT.CT_JobID and RS.RunStatus = YT.RunStatus
-order by RS.CT_JobID desc
+SELECT
+    YT.FileID,
+    RS.CT_JobID,
+    RS.highestrownum,
+    RS.RunStatus
+FROM
+    dbo.CT_JobRun YT
+LEFT JOIN
+    RunStatusForJobs RS ON RS.CT_JobID = YT.CT_JobID AND RS.RunStatus = YT.RunStatus
+ORDER BY
+    RS.CT_JobID DESC;
