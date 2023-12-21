@@ -1,34 +1,3 @@
-WITH RunStatusForJobs AS (
-    SELECT
-        CT_JobID,
-        RunStatus,
-        MAX(RunNo) AS highestrownum
-    FROM
-        dbo.CT_JobRun
-    GROUP BY
-        CT_JobID,
-        RunStatus
-),
-RankedResults AS (
-    SELECT
-        YT.FileID,
-        RS.CT_JobID,
-        RS.highestrownum,
-        RS.RunStatus,
-        ROW_NUMBER() OVER (PARTITION BY RS.CT_JobID ORDER BY RS.highestrownum DESC) AS RowNum
-    FROM
-        dbo.CT_JobRun YT
-    LEFT JOIN
-        RunStatusForJobs RS ON RS.CT_JobID = YT.CT_JobID AND RS.RunStatus = YT.RunStatus
-)
-SELECT
-    FileID,
-    CT_JobID,
-    highestrownum,
-    RunStatus
-FROM
-    RankedResults
-WHERE
-    RowNum = 1
-ORDER BY
-    CT_JobID DESC;
+Msg 8146, Level 16, State 1, Procedure dbo.up_CT_DPP_LaunchCheck, Line 0 [Batch Start Line 15]
+Procedure up_CT_DPP_LaunchCheck has no parameters and arguments were supplied.
+Warning: Null value is eliminated by an aggregate or other SET operation.
