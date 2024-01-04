@@ -1,58 +1,76 @@
-ALTER VIEW [dbo].[vw_CallTraceFilesToDisplay_New_Test] AS
-WITH RunStatusForJobs AS (
-   SELECT DISTINCT CT_JobID, FileID
-   FROM dbo.CT_JobRun
-   WHERE RunStatus NOT IN ('Neptune Complete', 'In QC', 'Verified', 'Cancelled', 'Complete')
-)
-SELECT TOP 1000
-   CASE
-      WHEN COUNT(JN.Job_Number) = 0 THEN 'No Matches'
-      WHEN COUNT(JN.Job_Number) > 1 THEN 'Multiple Matches'
-      ELSE MAX(JN.Job_Number)
-   END AS Job_Number,
-   v.fileid,
-   v.Source,
-   CAST(
-      REPLACE(
-         REPLACE(
-            REPLACE(
-               REPLACE(
-                  REPLACE(
-                     REPLACE(
-                        v.Folder,
-                        '\\cig.local\Data\Marketing Solutions Departments\Production\Data In\', '<Data In>\'
-                     ),
-                     '\\cig.local\Data\Marketing Solutions Departments\Production\Public\DataTransfer\Inbound\FromClientManagement\calltrace\', '<Internal CMT>\'
-                  ),
-                  '\\cig.local\Data\Marketing Solutions Departments\Production\Public\DataTransfer\Inbound\FromDOTO\calltrace\', '<Internal DOTO>\'
-               ),
-               '\\cig.local\Data\Marketing Solutions Departments\Production\Neptune\CallTrace\InTouch\', '<InTouch>\'
-            ),
-            '\\cig.local\Data\Marketing Solutions Departments\Production\Public\DataTransfer\InBound\FromSDQ\CallTrace', '<Internal SDQ>\'
-         ),
-         '\\cig.local\data\AppData\SFTP\Data\Usr\Credit\', '<EFT>\'
-      ) AS VARCHAR(255)) Folder,
-   v.filename,
-   FORMAT(v.Supplieddate, 'yyyy-MM-dd HH:mm') AS ReceivedDate,
-   v.filesize,
-   CASE
-      WHEN EXISTS (SELECT 1 FROM dbo.CT_Config WHERE ConfigItem = 'Launch Enabled' AND ConfigValue = 'True') THEN 'True'
-      ELSE 'False'
-   END AS NewColumn,
-   CASE
-      WHEN cb.JobType = 'DPP' AND (
-         SELECT [Enabled]
-         FROM Neptune.dbo.NeptuneVariables nv
-         INNER JOIN Cobra.Environments ce ON nv.varName = 'DPP_Default_BatchWorkflowEndpoint' AND nv.varValue = ce.Environment
-      ) = 1 THEN 'True'
-      ELSE 'False'
-   END AS AdditionalColumn
-FROM dbo.vw_ExistingFiles_New v
-LEFT JOIN dbo.CT_RejectedFiles r ON r.fileID = v.FileID AND r.FileSource = v.Source AND r.UnRejectedDate IS NULL
-LEFT JOIN dbo.CT_JobRun JR ON jr.fileID = v.FileID AND jr.FileSource = v.Source
-FULL OUTER JOIN dbo.vw_CallTraceJobList JN ON jn.InboundFolder = Folder AND v.FileName LIKE jn.InboundFileSpec
-LEFT JOIN RunStatusForJobs FR ON fr.FileID = v.FileID
-LEFT JOIN vw.CallTraceCurrentJobs cb ON JN.JobNumber = cb.JobNumber
-WHERE r.fileid IS NULL AND jr.fileid IS NULL AND v.FileID IS NOT NULL
-GROUP BY v.fileid, v.Source, Folder, v.filename, v.createddate, v.updateddate, v.Supplieddate, v.filesize, cb.JobType
-ORDER BY Updateddate;
+Function HeaderOnlyFile(myFile As String, HeaderInFirstRow as String) As String
+Dim mf As Object
+Dim Dummy As String
+Dim LineCount As Long
+
+' Nothing to do unless the file exists
+If Not fso.FileExists(myFile) Then
+  HeaderOnlyFile = "NotFound"
+Else
+  Set mf = fso.GetFile(myFile)
+
+  If mf.Size > 0 Then
+    
+    If HeaderInFirstRow = "True" Then
+      'ElseIf (Right(myFile, 4) = ".csv" Or Right(myFile, 4) = ".txt") Then
+      ' If not empty then need to check how many lines are in it
+      Set mf = Nothing
+      
+      Set mf = fso.OpenTextFile(myFile, ForReading)
+      
+      LineCount = 0
+      
+      ' Check if there is anything else in the file
+      Do While Not mf.AtEndOfStream And LineCount < 2
+      
+      Dummy = mf.ReadLine
+      LineCount = LineCount + 1
+      Loop
+      
+      If LineCount > 1 Then
+        HeaderOnlyFile = "FoundNotEmpty"
+        Else
+        HeaderOnlyFile = "FoundEmpty"
+      End If
+      
+      mf.Close
+      
+    Else
+      HeaderOnlyFile = "FoundNotEmpty"
+    Else
+      HeaderOnlyFile = "NotFound"
+      ' File is empty
+  End If
+End If
+
+End Function
+
+
+	'\\cig.local\Data\Marketing Solutions Departments\Production\Neptune\CallTrace\InTouch\','<InTouch>\')
+
+
+
+
+
+
+
+
+
+  'Create a trigger file called by fileID
+            Dim Fileout As TextStream
+            
+            ' Jeigu failas yra po neptune tada faila numetam iskarto i reikiama folderi ir i done
+            Set Fileout = fso.CreateTextFile(fileExistsTriggerFullPath, True, True)
+            
+            'Set trigger content to full file path (first row)
+            Fileout.Write strFile
+            Fileout.Write vbCrLf
+            'Adding new line JobNumber (second row)
+            Fileout.Write JobNumber
+            Fileout.Write vbCrLf
+            'Adding new line HeaderInFirstRow (third row)
+            Fileout.Write HeaderInFirstRow
+            
+            Fileout.Close
+            Set Fileout = Nothing
+    
