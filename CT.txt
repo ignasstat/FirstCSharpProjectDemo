@@ -74,3 +74,57 @@ End Function
             Fileout.Close
             Set Fileout = Nothing
     
+
+
+
+
+
+Function HeaderOnlyFile(myFile As String, HeaderInFirstRow As String) As String
+    Dim fso As Object
+    Dim mf As Object
+    Dim Dummy As String
+    Dim LineCount As Long
+    
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    ' Nothing to do unless the file exists
+    If Not fso.FileExists(myFile) Then
+        HeaderOnlyFile = "NotFound"
+    Else
+        Set mf = fso.GetFile(myFile)
+        
+        If mf.Size > 0 Then
+            If HeaderInFirstRow = "True" Then
+                ' If not empty, then need to check how many lines are in it
+                On Error Resume Next
+                Set mf = fso.OpenTextFile(myFile, 1)  ' ForReading (1)
+                On Error GoTo 0
+                
+                If Not mf Is Nothing Then
+                    LineCount = 0
+                    
+                    ' Check if there is anything else in the file
+                    Do While Not mf.AtEndOfStream And LineCount < 2
+                        Dummy = mf.ReadLine
+                        LineCount = LineCount + 1
+                    Loop
+                    
+                    mf.Close
+                    
+                    If LineCount > 1 Then
+                        HeaderOnlyFile = "FoundNotEmpty"
+                    Else
+                        HeaderOnlyFile = "FoundEmpty"
+                    End If
+                Else
+                    ' Unable to open file
+                    HeaderOnlyFile = "ErrorOpeningFile"
+                End If
+            Else
+                HeaderOnlyFile = "FoundNotEmpty"
+            End If
+        Else
+            HeaderOnlyFile = "FoundEmpty"  ' File is empty
+        End If
+    End If
+End Function
