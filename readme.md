@@ -3,11 +3,18 @@ Function DeleteFile(filePath As String)
     Dim attemptCount As Integer
     Dim maxAttempts As Integer
     Dim success As Boolean
-    
+
     Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    ' Check if the file exists before attempting to delete
+    If Not fso.FileExists(filePath) Then
+        MsgBox "File '" & filePath & "' does not exist."
+        Exit Function
+    End If
+
     attemptCount = 0
     maxAttempts = 6
-    
+
     Do While attemptCount < maxAttempts
         ' Attempt to delete the file
         On Error Resume Next
@@ -25,10 +32,9 @@ Function DeleteFile(filePath As String)
         
         attemptCount = attemptCount + 1
     Loop
-    
+
     ' Message if the file could not be deleted after multiple attempts
     If Not success Then
         MsgBox "Trigger file '" & filePath & "' could not be deleted after multiple attempts."
     End If
-      
 End Function
