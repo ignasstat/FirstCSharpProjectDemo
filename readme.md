@@ -1,48 +1,32 @@
-# Variables
-$Source = ""
-$strDate = ""
-$CreatedDate = ""
-$UpdatedDate = ""
-$FileSize = 0
-$blnProcess = $false
-$strSQL = ""
-$rst = New-Object -ComObject ADODB.Recordset
-$selectedRow = 0
-$JobNumber = ""
-$IsEmpty = $false
-$FileCheck = ""
+$HeaderInFirstRow = $true
+$myFile = "\\cig.local\data\AppData\SFTP\Data\Usr\DataBureau\Configuration\Scripts\Test\CallTrace Console\test.txt"
 
-function Get-FileViewData {
-    $dbConnectionString = "Data Source=pllwinlvsql002\mb21,1433;Integrated Security=SSPI;Initial Catalog=DataBureauDataLoadAudit"
 
-    $connection = New-Object System.Data.SqlClient.SqlConnection
-    $connection.ConnectionString = $dbConnectionString
-    $connection.Open()
 
-    $command = $connection.CreateCommand()
-    $command.CommandText = "SELECT TOP 1 Source, CreatedDate, UpdatedDate FROM vw.CallTraceFilesToDisplay_New_Test"
-    $reader = $command.ExecuteReader()
+function Check-FileExistsLocal { param( [string]$myFile, [bool]$HeaderInFirstRow )
 
-    if ($reader.HasRows) {
-        $reader.Read()
+if ( -not (Test-Path $myFile)) {
+    "not found"
+} else {
+    
 
-        $global:Source = $reader["Source"]
-        $global:CreatedDate = $reader["CreatedDate"]
-        $global:UpdatedDate = $reader["UpdatedDate"]
-
-        $reader.Close()
+    if ($myFile.Size -gt 0) {
+        if ($HeaderInFirstRow) {
+            $result = "test"#Check-ContainsMultipleLines -FileName $myFile
+            if ($result) {
+                "OK"
+            } else {
+                "Is empty"
+            }
+        } else {
+            "OK"
+        }
     } else {
-        $reader.Close()
-        Write-Host "No records found in the view."
+        "Is empty"
     }
-
-    $connection.Close()
+}
 }
 
-# Example Usage:
-Get-FileViewData
-Write-Host "Source: $Source"
-Write-Host "CreatedDate: $CreatedDate"
-Write-Host "UpdatedDate: $UpdatedDate"
+$answer =  Check-FileExistsLocal $myFile, $HeaderInFirstRow
 
-# Continue with the rest of your script...
+Write-Host $answer
