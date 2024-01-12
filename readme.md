@@ -1,78 +1,64 @@
-Function CheckFileExists_EFT(lngFileID As Long, JobNumber As String, ByVal HeaderInFirstRow As Boolean, strFile As String) As String
+function Check-FileExistsEFT {
+    param(
+        [long]$lngFileID,
+        [string]$JobNumber,
+        [bool]$HeaderInFirstRow,
+        [string]$strFile
+    )
 
-    Dim fileExistsTriggerFullPath As String
-    Dim foundFolder As String
-    Dim fileFoundPath As String
-    Dim foundNotEmpty As String
-    Dim fileFoundNotEmptyPath As String
-    Dim foundEmpty As String
-    Dim fileFoundEmptyPath As String
-    Dim fileNotFoundPath As String
-    Dim notFoundFolder As String
-    Dim fileExistsTriggerToProcessFolder As String
+    $FileExistsTriggerFolder = "YOUR_TRIGGER_FOLDER_PATH"
+    $fileExistsTriggerToProcessFolder = Join-Path -Path $FileExistsTriggerFolder -ChildPath "ToProcess"
+    $fileExistsTriggerFullPath = Join-Path -Path $fileExistsTriggerToProcessFolder -ChildPath "$lngFileID.trg"
+    $foundFolder = Join-Path -Path $FileExistsTriggerFolder -ChildPath "Found"
+    $foundNotEmpty = Join-Path -Path $foundFolder -ChildPath "NotEmpty"
+    $foundEmpty = Join-Path -Path $foundFolder -ChildPath "Empty"
+    $notFoundFolder = Join-Path -Path $FileExistsTriggerFolder -ChildPath "NotFound"
     
-    Dim Fileout As TextStream
-            
-    'Setup trigger folder paths and paths to the triggers
-    fileExistsTriggerToProcessFolder = FileExistsTriggerFolder & "ToProcess\"
-    fileExistsTriggerFullPath = fileExistsTriggerToProcessFolder & lngFileID & ".trg"
-    
-    foundFolder = FileExistsTriggerFolder & "Found\"
-    foundNotEmpty = foundFolder & "NotEmpty\"
-    foundEmpty = foundFolder & "Empty\"
-    notFoundFolder = FileExistsTriggerFolder & "NotFound\"
-    
-    fileFoundNotEmptyPath = foundNotEmpty & lngFileID & ".trg"
-    fileFoundEmptyPath = foundEmpty & lngFileID & ".trg"
-    fileNotFoundPath = notFoundFolder & lngFileID & ".trg"
-    'fileDonePath
-    
-    
-    'Before checking the trigger file, make sure to delete it if it was created before
+    $fileFoundNotEmptyPath = Join-Path -Path $foundNotEmpty -ChildPath "$lngFileID.trg"
+    $fileFoundEmptyPath = Join-Path -Path $foundEmpty -ChildPath "$lngFileID.trg"
+    $fileNotFoundPath = Join-Path -Path $notFoundFolder -ChildPath "$lngFileID.trg"
 
-    Call DeleteFile(fileFoundNotEmptyPath)
-    Call DeleteFile(fileFoundEmptyPath)
-    Call DeleteFile(fileNotFoundPath)
+    # Delete existing trigger files
+    Remove-Item -Path $fileFoundNotEmptyPath -ErrorAction SilentlyContinue
+    Remove-Item -Path $fileFoundEmptyPath -ErrorAction SilentlyContinue
+    Remove-Item -Path $fileNotFoundPath -ErrorAction SilentlyContinue
 
-    
-    'EFT 769 - Adding additional check if a file is already exist.
+    # EFT 769 - Adding additional check if a file already exists.
+    Remove-Item -Path $fileExistsTriggerFullPath -ErrorAction SilentlyContinue
 
-    Call DeleteFile(fileExistsTriggerFullPath)
+    # Create a trigger file called by fileID
+    $strHeaderInFirstRow = $HeaderInFirstRow.ToString()
 
-    'Create a trigger file called by fileID
-    
-    Set Fileout = fso.CreateTextFile(fileExistsTriggerFullPath, True, True)
-    
-    Dim strHeaderInFirstRow As String
-    strHeaderInFirstRow = CStr(HeaderInFirstRow)
-    
-    'Set trigger content to full file path (first row)
-    Fileout.Write strFile
-    Fileout.Write vbCrLf
-    'Adding new line JobNumber (second row)
-    Fileout.Write JobNumber
-    Fileout.Write vbCrLf
-    'Adding new line HeaderInFirstRow (third row)
-    Fileout.Write HeaderInFirstRow
-    
-    Fileout.Close
-    Set Fileout = Nothing
-    
-    'Loop until trigger file appears in one of the three folders
-    While Not (fso.FileExists(fileFoundNotEmptyPath) Or (fso.FileExists(fileFoundEmptyPath)) Or (fso.FileExists(fileNotFoundPath)))
-    Wend
-    
-    'Check if trigger file was moved to notfound,FoundNotEmpty and FoundEmpty subfolders
-    If fso.FileExists(fileNotFoundPath) Then
-        CheckFileExists_EFT = "not found"
-        Call DeleteFile(fileNotFoundPath)
-    ElseIf fso.FileExists(fileFoundNotEmptyPath) Then
-        CheckFileExists_EFT = "OK"
-        Call DeleteFile(fileFoundNotEmptyPath)
-    ElseIf fso.FileExists(fileFoundEmptyPath) Then
-        CheckFileExists_EFT = "Is empty"
-        Call DeleteFile(fileFoundEmptyPath)
-    End If
+    $content = @"
+$strFile
+$JobNumber
+$strHeaderInFirstRow
+"@
 
+    $content | Out-File -FilePath $fileExistsTriggerFullPath -Force
 
-End Function
+    # Loop until trigger file appears in one of the three folders
+    while (-not (Test-Path $fileFoundNotEmptyPath -or Test-Path $fileFoundEmptyPath -or Test-Path $fileNotFoundPath)) {
+        # Do nothing, just wait for the trigger file
+    }
+
+    # Check if the trigger file was moved to notfound, FoundNotEmpty, or FoundEmpty subfolders
+    if (Test-Path $fileNotFoundPath) {
+        "not found"
+        Remove-Item -Path $fileNotFoundPath -ErrorAction SilentlyContinue
+    } elseif (Test-Path $fileFoundNotEmptyPath) {
+        "OK"
+        Remove-Item -Path $fileFoundNotEmptyPath -ErrorAction SilentlyContinue
+    } elseif (Test-Path $fileFoundEmptyPath) {
+        "Is empty"
+        Remove-Item -Path $fileFoundEmptyPath -ErrorAction SilentlyContinue
+    }
+}
+
+# Example usage:
+$lngFileID = 123
+$JobNumber = "YourJobNumber"
+$HeaderInFirstRow = $true
+$strFile = "C:\Path\To\Your\File.txt"
+
+Check-FileExistsEFT -lngFileID $lngFileID -JobNumber $JobNumber -HeaderInFirstRow $HeaderInFirstRow -strFile $strFile
