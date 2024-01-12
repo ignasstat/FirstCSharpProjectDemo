@@ -1,46 +1,78 @@
-function Delete-File {
-    param(
-        [string]$filePath
-    )
+Function CheckFileExists_EFT(lngFileID As Long, JobNumber As String, ByVal HeaderInFirstRow As Boolean, strFile As String) As String
 
-    $fso = New-Object -ComObject Scripting.FileSystemObject
+    Dim fileExistsTriggerFullPath As String
+    Dim foundFolder As String
+    Dim fileFoundPath As String
+    Dim foundNotEmpty As String
+    Dim fileFoundNotEmptyPath As String
+    Dim foundEmpty As String
+    Dim fileFoundEmptyPath As String
+    Dim fileNotFoundPath As String
+    Dim notFoundFolder As String
+    Dim fileExistsTriggerToProcessFolder As String
+    
+    Dim Fileout As TextStream
+            
+    'Setup trigger folder paths and paths to the triggers
+    fileExistsTriggerToProcessFolder = FileExistsTriggerFolder & "ToProcess\"
+    fileExistsTriggerFullPath = fileExistsTriggerToProcessFolder & lngFileID & ".trg"
+    
+    foundFolder = FileExistsTriggerFolder & "Found\"
+    foundNotEmpty = foundFolder & "NotEmpty\"
+    foundEmpty = foundFolder & "Empty\"
+    notFoundFolder = FileExistsTriggerFolder & "NotFound\"
+    
+    fileFoundNotEmptyPath = foundNotEmpty & lngFileID & ".trg"
+    fileFoundEmptyPath = foundEmpty & lngFileID & ".trg"
+    fileNotFoundPath = notFoundFolder & lngFileID & ".trg"
+    'fileDonePath
+    
+    
+    'Before checking the trigger file, make sure to delete it if it was created before
 
-    # Check if the file exists before attempting to delete
-    if (-not $fso.FileExists($filePath)) {
-        Write-Host "File '$filePath' does not exist."
-        return
-    }
+    Call DeleteFile(fileFoundNotEmptyPath)
+    Call DeleteFile(fileFoundEmptyPath)
+    Call DeleteFile(fileNotFoundPath)
 
-    $attemptCount = 0
-    $maxAttempts = 6
-    $success = $false
+    
+    'EFT 769 - Adding additional check if a file is already exist.
 
-    do {
-        # Attempt to delete the file
-        try {
-            $fso.DeleteFile($filePath)
-        } catch {
-            # Ignore errors during deletion
-        }
+    Call DeleteFile(fileExistsTriggerFullPath)
 
-        # Check if the file still exists after deletion attempt
-        if (-not $fso.FileExists($filePath)) {
-            $success = $true
-            break
-        }
+    'Create a trigger file called by fileID
+    
+    Set Fileout = fso.CreateTextFile(fileExistsTriggerFullPath, True, True)
+    
+    Dim strHeaderInFirstRow As String
+    strHeaderInFirstRow = CStr(HeaderInFirstRow)
+    
+    'Set trigger content to full file path (first row)
+    Fileout.Write strFile
+    Fileout.Write vbCrLf
+    'Adding new line JobNumber (second row)
+    Fileout.Write JobNumber
+    Fileout.Write vbCrLf
+    'Adding new line HeaderInFirstRow (third row)
+    Fileout.Write HeaderInFirstRow
+    
+    Fileout.Close
+    Set Fileout = Nothing
+    
+    'Loop until trigger file appears in one of the three folders
+    While Not (fso.FileExists(fileFoundNotEmptyPath) Or (fso.FileExists(fileFoundEmptyPath)) Or (fso.FileExists(fileNotFoundPath)))
+    Wend
+    
+    'Check if trigger file was moved to notfound,FoundNotEmpty and FoundEmpty subfolders
+    If fso.FileExists(fileNotFoundPath) Then
+        CheckFileExists_EFT = "not found"
+        Call DeleteFile(fileNotFoundPath)
+    ElseIf fso.FileExists(fileFoundNotEmptyPath) Then
+        CheckFileExists_EFT = "OK"
+        Call DeleteFile(fileFoundNotEmptyPath)
+    ElseIf fso.FileExists(fileFoundEmptyPath) Then
+        CheckFileExists_EFT = "Is empty"
+        Call DeleteFile(fileFoundEmptyPath)
+    End If
 
-        # Wait for 10 seconds before the next deletion attempt
-        Start-Sleep -Seconds 10
 
-        $attemptCount++
-    } while ($attemptCount -lt $maxAttempts)
-
-    # Message if the file could not be deleted after multiple attempts
-    if (-not $success) {
-        Write-Host "Trigger file '$filePath' could not be deleted after multiple attempts."
-    }
-}
-
-# Example usage:
-$filePath = "C:\Path\To\Your\File.txt"
-Delete-File -filePath $filePath
+End Function
