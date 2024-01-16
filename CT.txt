@@ -1,2 +1,27 @@
-    While Not (fso.FileExists(fileFoundNotEmptyPath) Or (fso.FileExists(fileFoundEmptyPath)) Or (fso.FileExists(fileNotFoundPath)))
-    Wend
+Dim attemptCount As Integer
+Dim maxAttempts As Integer
+
+attemptCount = 0
+maxAttempts = 3
+
+Do While attemptCount < maxAttempts
+    If (fso.FileExists(fileFoundNotEmptyPath) Or fso.FileExists(fileFoundEmptyPath) Or fso.FileExists(fileNotFoundPath)) Then
+        ' File found, break out of the loop
+        Exit Do
+    End If
+    
+    ' Increment attempt count
+    attemptCount = attemptCount + 1
+    
+    ' Optionally, you can introduce a delay here before the next attempt
+    ' Sleep (delayInSeconds) 
+    
+Loop
+
+If attemptCount = maxAttempts Then
+    ' File not found after multiple attempts, handle accordingly or exit the function
+    MsgBox "File not found after multiple attempts."
+    Exit Function
+End If
+
+' Continue with the rest of your code if the file is found
