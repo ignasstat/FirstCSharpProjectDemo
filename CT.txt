@@ -1,27 +1,33 @@
-Dim attemptCount As Integer
-Dim maxAttempts As Integer
+$HeaderInFirstRow = $true
+$myFile = "\\cig.local\data\AppData\SFTP\Data\Usr\DataBureau\Configuration\Scripts\Test\CallTrace Console\test.txt"
 
-attemptCount = 0
-maxAttempts = 3
+function Check-FileExistsLocal {
+    param (
+        [string]$myFile,
+        [bool]$HeaderInFirstRow
+    )
 
-Do While attemptCount < maxAttempts
-    If (fso.FileExists(fileFoundNotEmptyPath) Or fso.FileExists(fileFoundEmptyPath) Or fso.FileExists(fileNotFoundPath)) Then
-        ' File found, break out of the loop
-        Exit Do
-    End If
-    
-    ' Increment attempt count
-    attemptCount = attemptCount + 1
-    
-    ' Optionally, you can introduce a delay here before the next attempt
-    ' Sleep (delayInSeconds) 
-    
-Loop
+    $fileInfo = Get-Item -LiteralPath $myFile
 
-If attemptCount = maxAttempts Then
-    ' File not found after multiple attempts, handle accordingly or exit the function
-    MsgBox "File not found after multiple attempts."
-    Exit Function
-End If
+    if (-not $fileInfo.Exists) {
+        "not found"
+    } else {
+        if ($fileInfo.Length -gt 0) {
+            if ($HeaderInFirstRow) {
+                $result = "test" # Check-ContainsMultipleLines -FileName $fileInfo.FullName
+                if ($result) {
+                    "OK"
+                } else {
+                    "Is empty"
+                }
+            } else {
+                "OK"
+            }
+        } else {
+            "Is empty"
+        }
+    }
+}
 
-' Continue with the rest of your code if the file is found
+$answer = Check-FileExistsLocal -myFile $myFile -HeaderInFirstRow $HeaderInFirstRow
+Write-Host $answer
