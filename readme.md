@@ -1,4 +1,1 @@
-$testas = "testaresadaasdddddddddsd"
-$test = $([System.IO.Path]::GetFileName($testas)).Substring(0, $([System.IO.Path]::GetFileName($testas)).Length - 5)
-
-Write-Host $test
+[[ClientFileName]]_Occupier_Lookup_with_CTv5_Segmentation_P2C_Score_[[YYYYMMDD]].csv
