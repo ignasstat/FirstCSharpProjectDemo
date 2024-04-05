@@ -55,3 +55,7 @@ GO
 
 
 
+Msg 4104, Level 16, State 1, Procedure vw_CallTraceFilesToDisplay_New_TestV2, Line 26 [Batch Start Line 9]
+The multi-part identifier "JNS.MaxJobNumber" could not be bound.
+
+
