@@ -1,5 +1,4 @@
-CREATE View [dbo].[vw_CallTraceFilesToDisplay_New_TestV2] as
-
+CREATE VIEW [dbo].[vw_CallTraceFilesToDisplay_New_TestV2] AS
 
 WITH RunStatusForJobs AS (
    SELECT DISTINCT CT_JobID, FileID 
@@ -10,7 +9,7 @@ SELECT TOP 1000
     JNS.JobStatus AS Job_Number,
     v.fileid, 
     v.Source,
-	 v.Folder,
+    v.Folder,
     v.filename,
     FORMAT(v.Supplieddate, 'yyyy-MM-dd HH:mm') AS ReceivedDate,
     v.filesize,
@@ -31,16 +30,11 @@ GROUP BY
     v.Source, 
     v.Folder, 
     v.filename, 
-    v.createddate, 
-    v.updateddate, 
-    v.Supplieddate, 
+    FORMAT(v.Supplieddate, 'yyyy-MM-dd HH:mm'), -- Added because it's functionally derived
     v.filesize,
     LC.CanLaunch,
-    JB.JobActive
+    JB.JobActive,
+    JNS.JobStatus -- This is necessary to include due to the error
 ORDER BY v.Updateddate;
 
 GO
-
-
-
-Column 'DataBureauDataLoadAudit.dbo.vw_CT_JobNumberStatus_Test.JobStatus' is invalid in the select list because it is not contained in either an aggregate function or the GROUP BY clause.
