@@ -1,50 +1,33 @@
-IF EXISTS (SELECT * FROM sys.views WHERE object_id = OBJECT_ID(N'[dbo].[vw_CallTraceFilesToDisplay_New_TestV2]'))
-DROP VIEW [dbo].[vw_CallTraceFilesToDisplay_New_TestV2];
-GO
+Private Function SendFileInternal(JobNumber As String)
 
-CREATE VIEW [dbo].[vw_CallTraceFilesToDisplay_New_TestV2] AS
+'CTC 133 - additional transfer to an internal location
+Dim rst As Recordset
+Dim strSQL As String
+Dim strDeliveryFolder As String
 
-WITH RunStatusForJobs AS (
-   SELECT DISTINCT CT_JobID, FileID 
-   FROM dbo.CT_JobRun 
-   WHERE RunStatus NOT IN ('Neptune Complete', 'In QC', 'Verified', 'Cancelled', 'Complete')
-),
-PreparedData AS (
-    SELECT TOP 1000 
-        JNS.JobStatus AS Job_Number,
-        v.fileid, 
-        v.Source,
-        v.Folder,
-        v.filename,
-        FORMAT(v.Supplieddate, 'yyyy-MM-dd HH:mm') AS ReceivedDate,
-        v.filesize,
-        LC.CanLaunch,
-        JB.JobActive
-    FROM dbo.vw_ExistingFiles_New v
-    LEFT JOIN dbo.CT_RejectedFiles r ON r.fileID = v.FileID AND r.FileSource = v.Source AND r.UnRejectedDate IS NULL
-    LEFT JOIN dbo.CT_JobRun JR ON JR.fileID = v.FileID AND JR.FileSource = v.Source 
-    LEFT JOIN RunStatusForJobs FR ON FR.FileID = v.FileID
-    LEFT JOIN [DataBureauDataLoadAudit].[dbo].[vw_CT_JobNumberStatus_Test] JNS ON JNS.fileid = v.FileID
-    LEFT JOIN [DataBureauDataLoadAudit].[dbo].[CT_Jobs] JB ON JNS.MaxJobNumber = JB.Job_Number
-    LEFT JOIN [DataBureauDataLoadAudit].[dbo].[vw_CT_LaunchCapability_Test] LC ON LC.fileid = v.FileID
-    WHERE r.fileid IS NULL 
-          AND JR.fileid IS NULL 
-          AND v.FileID IS NOT NULL 
-)
-SELECT 
-    Job_Number,
-    fileid, 
-    Source,
-    Folder,
-    filename,
-    ReceivedDate,
-    filesize,
-    CASE 
-        WHEN Job_Number IN ('No Matches', 'Multiple Matches') OR Job_Number LIKE '%-NA' THEN 'False'
-        ELSE CanLaunch
-    END AS CanLaunch,
-    JobActive
-FROM PreparedData
-ORDER BY UpdatedDate;
+Set rst = New Recordset
 
-GO
+
+strSQL = "select OutputToDOTO, OutputToDSA, OutputToSDQ from dbo.CT_Jobs where Job_Number = '" & JobNumber & "'"
+rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+'strSQL = "select OutputToDOTO, OutputToDSA, OutputToSDQ from dbo.CT_Jobs where Job_Number = '" & Trim(lblJDJobNo.Caption) & "'"
+'rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+
+
+If Not rst.EOF Then
+    If rst!OutputToDOTO Then
+        strDeliveryFolder = GetConfigValue("OutboundDOTO")
+        MsgBox strDeliveryFolder
+    ElseIf rst!OutputToDSA Then
+        strDeliveryFolder = GetConfigValue("OutboundDSA")
+        MsgBox strDeliveryFolder
+    ElseIf rst!OutputToSDQ Then
+        strDeliveryFolder = GetConfigValue("OutboundSDQ")
+        MsgBox strDeliveryFolder
+        'Call SendFile
+    End If
+End If
+
+rst.Close
+
+End Function
