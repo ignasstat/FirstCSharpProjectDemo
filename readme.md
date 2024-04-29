@@ -1,49 +1,14 @@
-Private Function SendFileInternal(JobNumber As String)
-    ' CTC 133 - additional transfer to an internal location
-    Dim rst As Recordset
-    Dim strSQL As String
-    Dim strDeliveryFolder As String
-    Dim db As Database ' Ensure that db is declared and set appropriately
+Visual Updates:
+	File List page:
+•	In the File List window table, there an extra column “CanLaunch”, 1 – an operator is allowed to launch a job, 0 – cannot launch a job, probably launch is disabled on the database
+•	“Launch Job” check box. Initially checked box would be selected, which means a file will be linked, set and launched automatically 
+•	If a file has an inactive job then you will “-NA” at the end of a job number an you won’t be able to process a file.
 
-    ' Initialize the database connection
-    Set db = CurrentDb()
+Job Details page:
+•	If  job was launched automatically the “Launch Job” button will be not at the page. If automatic launch would not be successful or the “Launch Job” check box wasn’t selected then the you would be able to launch a job from job details page.
 
-    ' SQL query to select columns based on the job number
-    strSQL = "SELECT OutputToDOTO, OutputToDSA, OutputToSDQ FROM dbo.CT_Jobs WHERE Job_Number = '" & JobNumber & "'"
-
-    On Error GoTo ErrorHandler ' Start error handling
-
-    Set rst = db.OpenRecordset(strSQL, dbOpenForwardOnly, adLockReadOnly)
-
-    If Not rst.EOF Then
-        ' Check each condition separately
-        If rst!OutputToDOTO Then
-            strDeliveryFolder = GetConfigValue("OutboundDOTO")
-            MsgBox strDeliveryFolder
-            ' Potentially call SendFile or other functionality
-        End If
-        If rst!OutputToDSA Then
-            strDeliveryFolder = GetConfigValue("OutboundDSA")
-            MsgBox strDeliveryFolder
-            ' Potentially call SendFile or other functionality
-        End If
-        If rst!OutputToSDQ Then
-            strDeliveryFolder = GetConfigValue("OutboundSDQ")
-            MsgBox strDeliveryFolder
-            ' Potentially call SendFile or other functionality
-        End If
-    End If
-
-Cleanup:
-    ' Clean up resources
-    If Not rst Is Nothing Then
-        If rst.State = adStateOpen Then rst.Close
-        Set rst = Nothing
-    End If
-    Set db = Nothing
-    Exit Function
-
-ErrorHandler:
-    MsgBox "An error occurred: " & Err.Description, vbCritical
-    Resume Cleanup
-End Function
+Background Changes:
+	Code was updated to allow launch jobs automatically, “JobLaunch” function was created.
+•	An operator wouldn’t be allowed to launch a job, if job is inactive or “CanLaunch” column has “0” as value, according message box will be received
+•	“CanLaunchJob” (does additional checks if a job can be launched) function was created in order to tidy up “JobLaunch” function.
+•	For database updates there were created following views and functions- vw_CallTraceFilesToDisplay_New_2, vw_CT_JobNumberStatus, fn_CT_CanLaunch.
