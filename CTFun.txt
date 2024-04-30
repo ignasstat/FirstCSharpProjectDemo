@@ -1,0 +1,47 @@
+If blnProcess Then
+                ' Need to check if the file has changed since the last update of the list.
+                ' If SFTP
+                If rst("Source") = "E" Then
+                    If Not FileCheck = "OK" Then
+                        MsgBox ("This file or version of it " & FileCheck & ", Reject it and Refresh Data")
+                        Call ClearFileLock(rst("FileID"), "E")
+                        blnProcess = False
+                    End If
+                ' If Data In
+                Else
+                    If Not FileCheck = "OK" Then
+                        MsgBox ("This file or version of it " & FileCheck & ", Reject it and Refresh Data")
+                        Call ClearFileLock(rst("FileID"), "I")
+                        blnProcess = False
+                    End If
+                End If
+            End If
+            
+            If blnProcess Then
+                If rst("Source") = "E" Then
+                    Source = "E"
+                Else
+                    Source = "I"
+                End If
+                
+                CreatedDate = rst("CreatedDate")
+                UpdatedDate = rst("UpdatedDate")
+            
+                If blnProcess Then
+                    If CreatedDate > UpdatedDate Then
+                        strDate = Format(CreatedDate, "dd mmm yyyy HH:MM")
+                    Else
+                        strDate = Format(UpdatedDate, "dd mmm yyyy HH:MM")
+                    End If
+
+
+
+Public Sub ClearFileLock(FileID As String, FileSource As String)
+' remove the lock on a file if it exists
+
+Dim SQL As String
+
+SQL = "execute [dbo].[up_CT_ClearFileLock] " & FileID & ", '" & FileSource & "'"
+db.Execute (SQL)
+
+End Sub
