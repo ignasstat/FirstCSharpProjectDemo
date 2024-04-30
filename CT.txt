@@ -1,33 +1,293 @@
-$HeaderInFirstRow = $true
-$myFile = "\\cig.local\data\AppData\SFTP\Data\Usr\DataBureau\Configuration\Scripts\Test\CallTrace Console\test.txt"
+Private Sub SetupJob(JobRunStatus As String, JobNumber As String, RunNumber As Integer, FileFolder As String, FileName As String, JobClient As String, RunID As String)
+' OK this button is to set the job up by creating the folder structure and copying the source file
+'CTC 077 Copy(Move) files from client location to job location using DTP
+'TOT 217 Create seperate DTP action xmls instead of Process XML
 
-function Check-FileExistsLocal {
-    param (
-        [string]$myFile,
-        [bool]$HeaderInFirstRow
-    )
+On Local Error GoTo cmdSetupJob_Error
 
-    $fileInfo = Get-Item -LiteralPath $myFile
+Dim strRootFolder As String
+Dim strJobFolder As String
+Dim LaunchFolder As Integer
+Dim SQL As String
+Dim rst As Recordset
 
-    if (-not $fileInfo.Exists) {
-        "not found"
-    } else {
-        if ($fileInfo.Length -gt 0) {
-            if ($HeaderInFirstRow) {
-                $result = "test" # Check-ContainsMultipleLines -FileName $fileInfo.FullName
-                if ($result) {
-                    "OK"
-                } else {
-                    "Is empty"
-                }
-            } else {
-                "OK"
-            }
-        } else {
-            "Is empty"
-        }
-    }
-}
+Dim nodeStep As Integer
+Dim InterimSubFolder As String
+Dim GUIDString As String
+Dim PGP_Input As String
+Dim PGPTempFolder As String
+Dim DecryptionAdded As Boolean
+Dim DTPProcessing As String
 
-$answer = Check-FileExistsLocal -myFile $myFile -HeaderInFirstRow $HeaderInFirstRow
-Write-Host $answer
+Dim FileCopied As Boolean
+Dim MaxProcessingTime As Integer
+Dim StartTime As Double
+Dim SecondsElapsed As Double
+
+Dim SaveLocation As String
+Dim DTPToLoad As String
+Dim ActionListNames As String
+Dim FirstActionPath As String
+
+Dim DeleteSource As Integer
+Dim sqlDeleteSrc As String
+
+FileCopied = False
+
+If LCase(JobRunStatus) = "logged" Then
+    
+    ' Determine if we need a Launch Folder
+    LaunchFolder = Get_LaunchFolder(JobNumber)
+    
+    SQL = "SELECT LaunchFolder FROM DataBureauDataLoadAudit.dbo.CT_Jobs where Job_Number='" & JobNumber & "'"
+
+    Set rst = New Recordset
+    rst.Open SQL, db, adOpenForwardOnly, adLockReadOnly
+    If rst.EOF Then
+        LaunchFolder = 0
+    Else
+        LaunchFolder = rst("LaunchFolder")
+    End If
+    rst.Close
+    
+    'EFT 734 - Specific Jobs when source files should always be moved
+ 
+    sqlDeleteSrc = "SELECT ISNULL(DeleteSource, 0) as DeleteSource FROM DataBureauDataLoadAudit.dbo.CT_Jobs where Job_Number='" & JobNumber & "'"
+    rst.Open sqlDeleteSrc, db, adOpenForwardOnly, adLockReadOnly
+    DeleteSource = rst("DeleteSource")
+    rst.Close
+
+    'Set the job folder name
+    strJobFolder = RootJobFolder & JobNumber & "_" & RunNumber
+    
+    ' CTC 089 - Different method of determining whether the file is local or DTP copy is required
+    If IsSourceFileLocal(FileFolder) Then
+        'Create the job folder and it's subfolders
+        fso.CreateFolder (strJobFolder)
+        fso.CreateFolder (strJobFolder & "\Original")
+        If LaunchFolder Then
+            fso.CreateFolder (strJobFolder & "\Launch")
+        End If
+        fso.CreateFolder (strJobFolder & "\Output")
+        fso.CreateFolder (strJobFolder & "\Reports")
+        fso.CreateFolder (strJobFolder & "\Sent")
+        fso.CreateFolder (strJobFolder & "\Old")
+        fso.MoveFile FileFolder & FileName, strJobFolder & "\Original\"
+    Else
+        'Needs copying from EFT using Data Transfer Process
+        'Debug.Print Now(); " Time when Setup Button was clicked"
+        
+        'Get the location for saving the DTP XML files
+        SQL = "select ConfigValue from CT_Config where ConfigItem = 'DTPPendingFolder'"
+        rst.Open SQL, db, adOpenForwardOnly, adLockReadOnly
+        SaveLocation = rst("ConfigValue")
+        rst.Close
+        
+        'Get the location for moving the DTP XML action ToLoad folder
+        SQL = "select ConfigValue from CT_Config where ConfigItem = 'DTPToLoadFolder'"
+        rst.Open SQL, db, adOpenForwardOnly, adLockReadOnly
+        DTPToLoad = rst("ConfigValue")
+        rst.Close
+
+        InterimSubFolder = InterimFolder & JobNumber & "_" & RunNumber
+        'Create subfolder in interim location
+        If fso.FolderExists(InterimSubFolder) Then
+           fso.DeleteFolder (InterimSubFolder)
+        End If
+        fso.CreateFolder (InterimSubFolder)
+        
+        'Generate GUID string for DTP XML
+        GUIDString = GUID.CreateGuidString
+        
+        'Iterating DTP action step sequence from 1
+        nodeStep = 1
+        'Check if decryption is required
+        DecryptionAdded = False
+        SQL = "select PGP_Input from ct_jobs where Job_Number = '" & JobNumber & "'"
+        Set rst = New Recordset
+        rst.Open SQL, db, adOpenForwardOnly, adLockReadOnly
+        If Not rst.EOF Then
+          If IsNull(rst("PGP_Input")) Then
+              PGP_Input = "0"
+          ElseIf rst("PGP_Input") = "False" Then
+              PGP_Input = "0"
+          ElseIf rst("PGP_Input") = "" Then
+              PGP_Input = "0"
+          ElseIf rst("PGP_Input") = "0" Then
+              PGP_Input = "0"
+          Else
+              PGP_Input = rst("PGP_Input")
+              DecryptionAdded = True
+          End If
+        End If
+        rst.Close
+                
+        'Debug.Print Now(); " Collected info for DTP request"
+                
+        'Create decryption node in DTP Request file
+        If DecryptionAdded Then
+           'Set temp folder for PGP decryption
+           PGPTempFolder = PGPTemporaryFolder & GUIDString
+           'Currently as the decryption key is same for all the PGP inbound files we need to set decryption key to empty value for Auto decryption folder
+           PGP_Input = ""
+           Call DTPXML.CreateDecryptionNode(GUIDString, ActionListNames, SaveLocation, nodeStep, FileName, FileFolder, PGPTempFolder, PGP_Input, JobNumber, JobClient)
+           
+           'The filename will no longer have .pgp extension, so need to remove that
+           If InStr(LCase(FileName), ".pgp") > 0 Then FileName = Replace(FileName, ".pgp", "")
+            'Or it may have .gpg extension
+           If InStr(LCase(FileName), ".gpg") > 0 Then FileName = Replace(FileName, ".gpg", "")
+           
+           'Copy the file from temporary PGP location to the interim folder
+           Call DTPXML.CreateCopyNode(GUIDString, ActionListNames, SaveLocation, nodeStep, PGPTempFolder, InterimSubFolder, FileName, JobNumber, JobClient)
+           
+           'After the file has been copied, we can delete the temporary PGP location
+           Call DTPXML.CreateDeletionNode(GUIDString, ActionListNames, SaveLocation, nodeStep, PGPTempFolder, JobNumber, JobClient)
+           
+        Else
+        'Create DTP request node to copy(move) files from input location to interim location
+        'EFT 734 - Specific Jobs when source files should always be moved
+            If DeleteSource = 1 Then
+                Call DTPXML.CreateMoveNode(GUIDString, ActionListNames, SaveLocation, nodeStep, FileFolder, InterimSubFolder, FileName, JobNumber, JobClient)
+            ElseIf InStr(LCase(FileFolder), "\production\data in\calltrace\") > 0 Or InStr(LCase(FileFolder), "\Neptune\CallTrace\InTouch\") > 0 Then
+                Call DTPXML.CreateMoveNode(GUIDString, ActionListNames, SaveLocation, nodeStep, FileFolder, InterimSubFolder, FileName, JobNumber, JobClient)
+            Else
+                Call DTPXML.CreateCopyNode(GUIDString, ActionListNames, SaveLocation, nodeStep, FileFolder, InterimSubFolder, FileName, JobNumber, JobClient)
+            End If
+        End If
+
+        'Create DTP request to create a trigger file when file copy has been complete using "BespokeCommand" with "out-file", inside the interimSubFolder
+        Call DTPXML.CreateTriggerNode(GUIDString, ActionListNames, SaveLocation, nodeStep, InterimSubFolder, JobNumber, RunNumber)
+        
+        'Move the first action into the ToLoad folder
+        FirstActionPath = Split(ActionListNames, ";")(0)
+        fso.MoveFile FirstActionPath, DTPToLoad
+
+        'Debug.Print Now(); " Created DTP action xmls"
+        
+        'Start the timer to check how long DTP process has been running
+        StartTime = Timer
+        MaxProcessingTime = 120
+        
+        'Loop until completed transfer trigger file is found - meaning the end of the copy
+        While Not fso.FileExists(InterimSubFolder & "\" & JobNumber & "_" & RunNumber & ".trg")
+            'Check the elapsed time
+            SecondsElapsed = Round(Timer - StartTime, 2)
+            
+            'Check if any actions triggers were moved to the failed folder
+            'Beggining and ending of action trigger names can differ, so need a wildcard to check if it exists
+            If (Dir(DTPFailedFolder + "*" & GUIDString & "*") <> vbNullString) Then
+                MsgBox "Request to copy the file failed" & vbCrLf & "Please contact Technical Operator."
+                Exit Sub
+            End If
+            
+           'It shouldn't take longer than 2 minutes, if it does it probably means DTP process failed to copy the file
+            If SecondsElapsed > MaxProcessingTime Then
+                MsgBox ("Request to copy the file from client to Job folder exceeded it's time limit - " & (MaxProcessingTime / 60) & " minutes")
+                
+                'Allow users to extend the time of the copy if time limit is exceeded
+                If (MsgBox("Extend time limit by another minute?", vbYesNo) = vbYes) Then
+                    MaxProcessingTime = MaxProcessingTime + 60
+                Else
+                    Exit Sub
+                End If
+            End If
+            
+        Wend
+        ' Debug.Print Now(); " Detected trigger created by DTP"
+        
+        'Create required job folders
+        fso.CreateFolder (strJobFolder)
+        fso.CreateFolder (strJobFolder & "\Original")
+        If LaunchFolder Then
+            fso.CreateFolder (strJobFolder & "\Launch")
+        End If
+        fso.CreateFolder (strJobFolder & "\Output")
+        fso.CreateFolder (strJobFolder & "\Reports")
+        fso.CreateFolder (strJobFolder & "\Sent")
+        fso.CreateFolder (strJobFolder & "\Old")
+        
+        'Third timer
+        ' Debug.Print Now(); " Created job folders"
+        
+        'Move file from interim location to Job folder using CTC
+        fso.MoveFile InterimSubFolder & "\" & FileName, strJobFolder & "\Original\"
+        
+        ' Debug.Print Now(); " Moved the file from interim to job folder"
+    
+        'Delete the interim subfolder along the completed transfer trigger
+        fso.DeleteFolder (InterimSubFolder)
+        ' Debug.Print Now(); " Deleted the interim folder"
+    End If
+    
+    FileCopied = True
+    
+    ' check if we have a file with a leading space in the name as this can cause errors. If RTrim(lblJDFileName.Caption) <> Trim(lblJDFileName.Caption) Then
+    If RTrim(FileName) <> Trim(FileName) Then
+        ' no leading spaces
+        fso.MoveFile strJobFolder & "\Original\" & RTrim(FileName), strJobFolder & "\Original\" & Trim(FileName)
+        FileName = Trim(FileName)
+    End If
+    ' Debug.Print Now(); " Checked and/or removed leading spaces"
+        
+    JobRunStatus = "Pre-Processing"
+    
+    Call UpdateRunStatus(RunID, JobRunStatus, 0, "")
+    ' Debug.Print Now(); " Updated run status"
+        
+    Call SetActions(JobRunStatus)
+    ' Debug.Print Now(); " Console actions set"
+    MsgBox ("Folders Created and Source File Copied")
+
+End If
+
+Exit Sub
+
+
+cmdSetupJob_Error:
+    If FileCopied Then
+        MsgBox "Error occured before copying the file, make sure the file exists and try again."
+        MsgBox "Error: " & Err.Description
+        Exit Sub
+    Else
+        MsgBox "Error occured after copying the file to job folder. Contact Technical Operator."
+        MsgBox "Error: " & Err.Description
+        Exit Sub
+    End If
+
+
+End Sub
+
+--------------
+
+
+Function Get_LaunchFolder(JobNumber As String) As Integer
+
+    Dim strSQL As String
+    Dim rst As Recordset
+    Dim LaunchFolder As Integer
+
+    strSQL = "SELECT LaunchFolder FROM DataBureauDataLoadAudit.dbo.CT_Jobs where Job_Number='" & JobNumber & "'"
+    
+    Set rst = New Recordset
+    rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+    If rst.EOF Then
+        LaunchFolder = 0
+    Else
+        LaunchFolder = rst("LaunchFolder")
+    End If
+    rst.Close
+
+    Get_LaunchFolder = LaunchFolder
+
+End Function
+
+---------
+Function Trim(varIn As Variant) As String
+
+    If IsNull(varIn) Then
+        Trim = ""
+    Else
+        Trim = LTrim(RTrim(varIn))
+    End If
+
+End Function
