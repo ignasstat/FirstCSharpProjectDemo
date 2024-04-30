@@ -291,3 +291,33 @@ Function Trim(varIn As Variant) As String
     End If
 
 End Function
+
+
+------------------------------------
+
+Sub UpdateRunStatus(strRunID As String, strStatus As String, intError As Integer, strTTP As String)
+
+Dim strSQL As String
+
+' update the run status for the given job and refresh screen
+strSQL = "Update dbo.CT_JobRun Set RunStatus = '" & strStatus & "' where CT_RunID = " & strRunID
+db.Execute (strSQL)
+
+' add an entry to the run status audit log
+If LCase(strStatus) = "failed" Then
+    strSQL = "insert into dbo.CT_RunStatusLog (CT_RunID, CT_Status, UserName, UpdateDate, ErrorType, TTP) "
+    strSQL = strSQL & "select " & strRunID & ", '" & strStatus & "', '" & strUserName & "', getdate(), ErrorType, '" & strTTP & "' "
+    strSQL = strSQL & "from dbo.CT_ErrorType where CT_ErrorID = " & Trim(intError)
+Else
+    strSQL = "insert into dbo.CT_RunStatusLog (CT_RunID, CT_Status, UserName, UpdateDate) values (" & strRunID & ", '" & strStatus & "', '" & strUserName & "', getdate()) "
+End If
+
+db.Execute (strSQL)
+
+' if completed update the job run with completion date
+If LCase(strStatus) = "complete" Then
+    strSQL = "Update dbo.CT_JobRun Set CompletedDate = getdate() where ct_runID = " & strRunID
+    db.Execute (strSQL)
+End If
+
+End Sub
