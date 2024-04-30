@@ -1,18 +1,8 @@
-Current: "In the File List window table, there an extra column “CanLaunch”, 1 – an operator is allowed to launch a job, 0 – cannot launch a job, probably launch is disabled on the database"
-Corrected: "In the File List window table, there is an extra column “CanLaunch”, where 1 means an operator is allowed to launch a job, and 0 means they cannot, possibly because launching is disabled in the database."
-Current: "“Launch Job” check box. Initially checked box would be selected, which means a file will be linked, set and launched automatically"
-Corrected: "“Launch Job” checkbox. Initially, this checkbox will be selected, indicating that a file will be linked, set, and launched automatically."
-Current: "If a file has an inactive job then you will “-NA” at the end of a job number an you won’t be able to process a file."
-Corrected: "If a file is associated with an inactive job, “-NA” will appear at the end of the job number, and you won’t be able to process the file."
-Job Details Page:
-Current: "If a job was launched automatically the “Launch Job” button will be not at the page. If automatic launch would not be successful or the “Launch Job” check box wasn’t selected then the you would be able to launch a job from job details page."
-Corrected: "If a job was launched automatically, the “Launch Job” button will not appear on the page. If the automatic launch was unsuccessful or the “Launch Job” checkbox was not selected, then you will be able to launch the job from the Job Details page."
-Background Changes:
-Current: "Code was updated to allow launch jobs automatically, “JobLaunch” function was created."
-Corrected: "Code was updated to allow automatic job launches; the “JobLaunch” function was created."
-Current: "An operator wouldn’t be allowed to launch a job, if job is inactive or “CanLaunch” column has “0” as value, according message box will be received"
-Corrected: "An operator will not be allowed to launch a job if the job is inactive or the “CanLaunch” column has a value of “0”; an appropriate message box will be displayed."
-Current: "“CanLaunchJob” (does additional checks if a job can be launched) function was created in order to tidy up “JobLaunch” function."
-Corrected: "The “CanLaunchJob” function was created to perform additional checks on whether a job can be launched, thus streamlining the “JobLaunch” function."
-Current: "For database updates there were created following views and functions- vw_CallTraceFilesToDisplay_New_2, vw_CT_JobNumberStatus, fn_CT_CanLaunch."
-Corrected: "For database updates, the following views and functions were created: vw_CallTraceFilesToDisplay_New_2, vw_CT_JobNumberStatus, and fn_CT_CanLaunch."
+Hi,
+
+Noticed that from the time we set the repeat transfer an that was on 02/02/2024, it wasn’t used.
+
+My question would be if it’s still relevant repeat transfer to have or it supposed to be an adhoc transfer?
+
+Thanks,
+Ignas 
