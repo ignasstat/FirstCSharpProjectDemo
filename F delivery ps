@@ -1,0 +1,447 @@
+<#################################################################################################################################################
+
+    Cobra Final Delivery Script
+
+                            NOT TO BE CHANGED BY DATABUREAU
+
+    Derived from TrueVision version
+    
+    No real reason to have one per service, just need to parameterise the delivery details.  Also with the new way of parameter recording setup
+    in the DNA Post Processing script can actually incorporate the configs all into 1, possibly?
+
+    Variables:
+        Files to deliver -  default would be "$($JobNumberDate)_SNT.zip" 
+                         -  Alternative is a list of file specs which must all be present before delivery goes ahead
+                            This means we can do 2 things:    
+                                                            Deliver multiple jobs in 1 process
+                                                            Deliver additional files within the same job (eg where compressed separately)
+                            Additionally each job requires up to 2 inputs from the operator:
+                                Have SAS checks been configured?
+                                Have CMT approved delivery?
+                            However not all jobs require these sign offs, so again we could add this the config file
+
+
+
+
+    This is a standard script designed to called from an initiating script stored in each job template
+
+    The inbound parameter are the Initiating Host and the source job folder, from which everything else can be determined 
+    
+    After checking everything is in order the script will copy the output files to the DTP transfer area.
+    
+	2021-10-20 - TOT 383 - KT - Created from the BSB version
+    2021-10-23 - TOT 386 - KT - Updated to allow for cases where outputs from Multiple jobs are sent using the same script
+                                Also Added a Debug Mode which runs the script fully but without the actual Copy being executed
+    2021-12-09 - TOT 397 - KT - Updated so that debug mode is called by parameter.  
+    2021-12-13 - TOT 397 - KT - Updated to allow more logical config filenames 
+    2021-12-21 - TOT 405 - KT - Updated to allow bespoke output folder names via new config item
+    2022-01-27 - TOT 417 - KT - Remove the Log Archiving this is not adding value
+    2022-03-21 - TOT 434 - KT - If No Files are specified in the config file then use default output filename
+    2022-05-10 - TOT 443 - KT - Add Tag replacements for config file for JobNumber 
+                                Put Tag replacements for config into 1 statement instead of each line
+                                Add ability to output to DOTO instead of client
+    2024-03-12 - TOT 628 - KT - Data DNA can now be OutputFiles, only use Output if it exists
+
+<##################################################################################################################################################>
+#
+param
+(
+    [String] $HostName,
+    [String] $JobFolder,
+    [String] $InDebugMode = 'No'
+)
+#>
+
+<# Test Data
+
+$JobFolder = '\\VALWINLVAPP030\bsbappend$\Jobs\TEST_AREA\CDA0006257_202401\'
+$InDebugMode = 'Yes'
+$HostName = "VALWINLVAPP027"
+# Test Data End #>
+
+$CorrectHostNames    = 'VALWINLVAPP027|VALWINLVAPP028|CRLWINLVAPP034|CRLWINLVAPP035'
+
+# Check we are running from correct server
+if ($InDebugMode.ToLower() -eq 'yes') { 
+    $DebugMode = $true 
+}
+else {
+    $DebugMode = $false
+    if ($HostName -notmatch $CorrectHostNames) {
+        $ErrorMessage = "$($CRLF)This script must be run on Tool Servers only!$($CRLF)Expected host name: $($CorrectHostNames.replace('|',' or '))$($CRLF)Current host name: $HostName $($CRLF)Hit Return to close"
+        $Confirm = (Read-Host "`n$ErrorMessage").ToLower()
+        Exit 
+    }
+}
+
+# setup standard derived variables
+$JobNumberDate       = $JobFolder.ToUpper() | Split-Path  -Leaf
+
+$TransferFolder      = "\\valwinlvapp030\CobraShare$\DataTransfers\OutBound\"
+
+if($JobNumberDate.Contains('_')) {
+    $JobNumber, $Jobdate = $JobNumberDate.split('_')
+    $Adhoc = $False
+}
+else {
+    $JobNumber = $JobNumberDate
+    $Jobdate = ''
+    $Adhoc = $True
+}
+
+$ConfigFile          = $(join-path $(join-path $JobFolder "ConfigFiles") "$($JobNumber)_FinalDeliveryConfig.txt")
+$OutputLog           = $(join-path $(join-path $JobFolder "LogFiles") "$($JobNumberDate)_Output.Log")
+$JobLogSubFolder     = "LogFiles\"
+$CRLF                = [char[]]::new(2);$CRLF[0]=[char](13);$CRLF[1]=[char](10)
+$LogFileName         = "$($JobNumberDate)_Delivery_$(get-date -Format yyyyMMdd).log"
+$logFile             = join-path $JobFolder (join-path $JobLogSubFolder $LogFileName)
+$OutputList          = @()    
+
+#Data Server Root locations where jobs can exist
+$DataServers=@()   
+$DataServers += "\\VALWINLVAPP030\bsbappend$\Jobs\"
+$DataServers += "\\CRLWINLVAPP037\bsbappend$\Jobs\"
+
+# Load all the functions we may need from a seperate module
+. "\\VALWINLVAPP030\bsbappend$\Jobs\General\MonthlyTemplates\Scripts\ActionFunctions.ps1"
+
+##################################################################################################################################################
+
+Clear-Host
+Write-Log $logFile "Starting Final Delivery"
+Write-Log $logFile "Job Number   : $JobNumberDate"
+Write-Log $logFile "`nTechnician: $env:UserName"
+
+##################################################################################################################################################
+# If there is an output log this contains everything we need, otherwise readcheck for a config file, otherwise use defaults
+#$OutputLog = "\\VALWINLVAPP030\bsbappend$\Jobs\CDA0008806\LogFiles\CDA0008806_Output.log"
+
+# Check if there is an outputlog of the required version
+if(Test-path $OutputLog ) {
+    if($(get-content -literalpath $OutputLog) | where{$_ -like 'DeliveryLogVersion|*'}) {
+        $UseOutputLog = $true
+    
+    } else {
+        $UseOutputLog = $false
+    }
+} else {
+    $UseOutputLog = $false
+}
+
+
+if(Test-path $ConfigFile) { 
+    
+    Write-Log $logFile "Config File  : $($(get-item $ConfigFile).Name)"
+    
+    # Get the required details from the config - Output files will be a collection, others single variables
+    $ConfigData = get-content -literalpath $ConfigFile
+    $ConfigData = $ConfigData.Replace('<JobNumber>_<JobDate>',$JobNumberDate).Replace('<JobNumber>',$JobNumber).Replace('<JobDate>',$JobDate)
+    
+    $OutputList           += $ConfigData     | where{$_ -like 'DeliveryFile|*'}   | Select -Property @{Name = 'OutputFilename'; Expression = {$($_.Split("|")[1])}}
+    # TOT 434 if no Outputlist entries then use the default output filename
+    if($OutputList.Count -eq 0) {
+        $OutputList   += [pscustomobject]@{Action="Create";OutputFilename="$($JobNumberDate)_SNT.zip"}
+    }
+        
+    # TOT 405
+    $Destination          =  $ConfigData     | where{$_ -like 'Destination|DOTO'} 
+    $OverrideOutputFolder =  $ConfigData     | where{$_ -like 'OutputFolder|*'}   | Select -first 1 | Select -Property @{Name = 'OutputFolder'; Expression = {$($_.Split("|")[1].trim())}}
+    $OverrideSAS          = if($($ConfigData | where{$_ -like 'OverideCheckSAS|True'})) {$true} else {$false}
+    $OverrideCMT          = if($($ConfigData | where{$_ -like 'OverideCheckCMT|True'})) {$true} else {$false}
+    $JobTypeEntry         = $($ConfigData    | where{$_ -like 'JobType|*'})
+    if($JobTypeEntry) { 
+        $JobType = $($JobTypeEntry | Select -First 1).tostring().Split("|")[1].ToUpper() }
+    else {
+        $JobType = "BSB"
+    }
+
+    $AutoCopyMode = $false
+}
+elseif($UseOutputLog) {
+
+    Write-Log $logFile "Using Output Log : $($(get-item $OutputLog).Name)"
+    
+    $OutputData  = get-content -literalpath $OutputLog
+    $JobType     = $($OutputData    | where{$_ -like 'JobType|*'}).Split("|")[1]
+    $Destination = $($OutputData    | where{$_ -like 'DeliveryFolder|*'}).Split("|")[1]
+    
+    # determine which ouputs are for clients
+    if ($($OutputData    | where{$_ -like 'StandardDelivery|Client'})) {
+        $OutputList  += $OutputData  | where{$_ -like 'StandardOutputZip|*'} | Select -Property @{Name = 'OutputFilename'; Expression = {$($_.Split("|")[1])}}
+    }
+    if ($($OutputData    | where{$_ -like 'RawDelivery|Client'})) {
+        $OutputList  += $OutputData  | where{$_ -like 'RawOutputZip|*'}      | Select -Property @{Name = 'OutputFilename'; Expression = {$($_.Split("|")[1])}}
+    }
+
+    $OverrideOutputFolder =  $false
+    $OverrideSAS          = if($($OutputData | where{$_ -like 'OverideCheckSAS|True'})) {$true} else {$false}
+    $OverrideCMT          = if($($OutputData | where{$_ -like 'OverideCheckCMT|True'})) {$true} else {$false}
+    
+    $AutoCopyMode = $true
+    
+} 
+else {
+    
+    Write-Log $logFile "Config File  : Not Found - Using Defaults"
+
+    $OutputList   += [pscustomobject]@{Action="Create";OutputFilename="$($JobNumberDate)_SNT.zip"}
+    $OverrideSAS   = $false
+    $OverrideCMT   = $false
+    $JobType       = "BSB"
+
+    $AutoCopyMode = $false
+}
+
+# TOT 405 - job output folder depends on Job Type, but can be overriden
+if($OverrideOutputFolder) {    
+
+    $JobOutputFolder     = "$($OverrideOutputFolder.outputfolder)\" 
+}
+elseif( $JobType -Like "*DNA*") {
+    # TOT 628 - Only use Output for DNA jobs where the Output folder exists
+
+    if(test-path $(join-path $JobFolder 'output') ) {
+        $JobOutputFolder     = "Output\"
+    }
+    else {
+        $JobOutputFolder     = "OutputFiles\"
+    }
+}
+else {
+
+    $JobOutputFolder     = "OutputFiles\"
+}  
+
+# TOT 443 - Set Destination folder which could now be DOTO
+if($AutoCopyMode) {
+    
+    $DestinationFolder = $Destination
+
+} else {
+    if($Destination) { 
+        $Destination = $Destination.Replace('Destination|','') 
+    }
+    if ($Destination -eq 'DOTO') {
+        $DestinationFolder   = join-path $TransferFolder $(join-path 'RepeatTransfers\ToDOTO' $JobNumber)
+    }
+    elseif($Adhoc) {
+        $DestinationFolder   = join-path $TransferFolder $JobNumber
+    }
+    else {
+        $DestinationFolder   = join-path $TransferFolder $(join-path 'RepeatTransfers' $JobNumber)
+    }
+}
+
+# write config details to log
+Write-Log $logFile "JobType      : $JobType"
+Write-Log $logFile "Override SAS : $OverrideSAS"
+Write-Log $logFile "Override CMT : $OverrideCMT"
+Write-Log $logFile "Output From  : $JobOutputFolder"
+Write-Log $logFile "Destination  : $DestinationFolder"
+foreach($Output in $OutputList) {
+    Write-Log $logFile "Output File  : $($Output.OutputFilename)"
+}
+
+##################################################################################################################################################
+# Prepare the Actual file list to send
+if($AutoCopyMode) {
+       
+    $ActualFiles= @()
+    $AllFilesPresent = $true
+
+    $SourceFolder = join-path $JobFolder $JobOutputFolder
+
+    # In this mode these are actual filenames rather than Filespecs, so just need to check for existence
+    foreach ($Output in $OutputList) {
+        
+        $FullPath = $(join-path $SourceFolder $Output.OutputFilename)
+        
+        if($(test-path $FullPath)){
+        
+            $ActualFiles += Get-Item $FullPath
+        } else {
+            $AllFilesPresent = $true
+        }
+    }   
+} else { 
+    # For the non Auto jobs we will have file specs so need to ensure that these match correctly
+    # Add the full path for each file to send - may be local to the job or from a different job which could be on a different server
+    # Files can be listed either with or without a job folder which is indicated by containig a \.  
+    # Where \ is present we need to check which server the job folder is on
+    # where not present the file is in the current job
+    # Add a count field, but for now this will always be 0
+
+    $FileSpecWithPath = @()
+    foreach($FS_Item in $OutputList) {  
+        if($FS_Item.outputfilename.contains("\")) {
+            # this entry is a different job and could be on a different server
+            foreach($Server in $DataServers) {
+                $ServerMatched = $false
+                if(Test-path (join-path $Server $FS_Item.outputfilename)) {
+                    $FileSpecWithPath += [pscustomobject]@{Path=$(join-path $Server $FS_Item.outputfilename);Count=0}
+                    $ServerMatched = $True
+                    break
+                }
+            }
+            # if not found then default to 1st server. This simplifies the reporting of the file status, they will show as not found later
+            if(!$ServerMatched) {
+                $FileSpecWithPath += [pscustomobject]@{Path=$(join-path $DataServers[0] $FS_Item.outputfilename);Count=0}
+            }
+        }
+        else {
+            $FileSpecWithPath += [pscustomobject]@{Path=$(join-path $JobFolder $(join-path $JobOutputFolder $FS_Item.outputfilename));Count=0}
+        }
+    }
+
+    # now match to find actual existing files and add the count
+    $ActualFiles= @()
+    $AllFilesPresent = $true
+
+    foreach ($FS_Item in $FileSpecWithPath) {
+        Try {
+            $TempList = Get-ChildItem $FS_Item.Path -File -ErrorAction Stop
+            $ActualFiles += $TempList
+            $FS_Item.count = @($TempList).Count
+        }
+        Catch {
+            $AllFilesPresent = $false
+            $FS_Item.count = 0
+        }
+    }
+}
+
+##################################################################################################################################################>
+# These are critical deliveries so check files and then check with user that we are OK to proceeed
+
+# Check Source Files and Destination Folder
+If($ActualFiles.Count -lt 1) {
+    Write-log $logFile "`nNo Source Files Found"
+    $Proceed = $False
+}
+elseif(!(test-path $DestinationFolder)) {
+    # Destination missing so try and create it
+    try {
+        new-item $DestinationFolder -ItemType directory -ErrorAction Stop
+        Write-log $logFile "`nDestination Folder Created"
+        $Proceed = $True
+    }
+    catch {
+        Write-log $logFile "`nDestination Folder can't be Found or Created"
+        $Proceed = $False
+    }
+}
+else {
+    $Proceed = $True
+}
+
+If($Proceed){
+
+    if($AutoCopyMode) {
+
+        # List files here - no need to ask operator
+        Write-Log $logFile "`nMatched Files Found:"
+        foreach($SourceFile in $ActualFiles) {
+            Write-log $logFile "`t$SourceFile"
+        }
+    
+        Write-Log $logFile "`nDestination Folder:"
+        Write-Log $logFile "`t$DestinationFolder"
+    
+    } else {
+        $FilesForEachSpec = $true
+        Write-Log $logFile "`nFile Specifications Expected:"
+        foreach($FS_Item in $FileSpecWithPath) {  
+            Write-log $logFile ("`t" + $FS_Item.path +" - `tMatching Files Found:" + $FS_Item.Count)
+            if($FS_Item.Count -lt 1) {
+                $FilesForEachSpec = $false
+            }
+        }        
+        if(!$FilesForEachSpec) {
+            Write-Log $logFile "`n`tNOT ALL FILE SPECIFICATIONS LISTED HAVE MATCHED TO FILES"
+        
+            if($AllFilesRequired) {
+                Write-Log $logFile "`n`tThis Transfer can't proceed without all files being present"
+                $Proceed = $False
+            }
+        }
+        Write-Log $logFile "`nMatched Files Found:"
+        foreach($SourceFile in $ActualFiles) {
+            Write-log $logFile "`t$SourceFile"
+        }
+    
+        Write-Log $logFile "`nDestination Folder:"
+        Write-Log $logFile "`t$DestinationFolder"
+       
+        if($Proceed){
+            $FilesCorrect = (Read-Host "`nIs the Matched Files list and Destination folder complete and correct? (Y/N)").ToLower()
+            if($FilesCorrect -eq 'y') {
+                Write-Log $logFile "Files Confirmed as Correct"
+            }
+            else{
+                Write-Log $logFile "Files NOT Confirmed as Correct"
+                $Proceed = $False
+            }
+        }
+    }    
+
+    # Check that QC processes are complete or the job is exempt
+    if($Proceed -and !$OverrideSAS){
+        $QC_Checks = (Read-Host "`nHave all SAS QC Checks been completed OK? (Y/N)").ToLower()
+        if($QC_Checks -eq 'y') {
+            Write-Log $logFile "SAS QC Checks Confirmed Completed"    
+        }
+        else {
+            $Proceed = $False
+        }
+    }
+    else {Write-Log $logFile "SAS QC Checks Override Set"}
+
+    # Check that Client Management have approved transfer or the job is exempt from waiting
+    if($Proceed -and !$OverrideCMT) {
+
+        $Contact_Checks = (Read-Host "`nHas Client Delivery Approval been received from Client Management? (Y/N)").ToLower()    
+
+        if($Contact_Checks -eq 'y') {
+            Write-Log $logFile "Client Delivery Approval Confirmed Received"   
+        }
+        else {
+            $Proceed = $False
+        }
+    }
+    else {Write-Log $logFile "Client Delivery Approval Override Set"}
+}
+
+##################################################################################################################################################>
+# Copy the files found
+
+if($Proceed){
+
+    foreach($SourceFile in $ActualFiles) {
+        
+        if($Proceed) {
+            Write-Log $logFile "Copying: $SourceFile"
+            try {
+                if($DebugMode) {
+                    Write-Host "Pretending to copy"
+                }
+                else
+                { 
+                    copy-item -literalpath $SourceFile -destination $DestinationFolder -ErrorAction Stop
+                }
+                Write-Log $logFile "Copy OK"
+            } 
+            catch {
+                Write-Log $logFile "Copy - FAILED"
+                Write-Log $logFile "Aborting Transfer"
+                $Proceed = $False
+            }
+        }
+    }
+}
+else {
+    Write-Log $logFile "Transfer Terminated by User" 
+}
+
+Write-Log $logFile "Ending Transfer Process"
+
+##################################################################################################################################################>
