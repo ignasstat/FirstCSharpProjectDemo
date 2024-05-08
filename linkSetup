@@ -113,8 +113,8 @@ If (Get-FileViewData)
     # Check and update job run details
     if ($blnProcess) {
         $sql = "INSERT INTO dbo.CT_JobRun (CT_JobID, fileid, FileSource, RunNo, CreatedBy, createddate, RunStatus, DueByDate) "
-        $sql += "SELECT ct_JobID, 'FileID', 'Source', case when LastRun > LastNeptuneRun then LastRun+1 else LastNeptuneRun+1 end, "
-        $sql += "'Current User', GETDATE(), 'Logged', dbo.fn_CallTraceDueDate_New('Date', j.job_number) "
+        $sql += "SELECT ct_JobID, $FileID, $Source, case when LastRun > LastNeptuneRun then LastRun+1 else LastNeptuneRun+1 end, "
+        $sql += "$currentUserName, GETDATE(), 'Logged', dbo.fn_CallTraceDueDate_New($strDate, j.job_number) "
         $sql += "FROM dbo.vw_CallTraceJobList v INNER JOIN dbo.ct_jobs j ON v.job_number = j.job_number "
         $sql += "WHERE v.job_number = '$jobNumber'"
         Execute-SQLCommand $sql
