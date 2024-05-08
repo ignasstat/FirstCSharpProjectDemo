@@ -1,0 +1,455 @@
+<#################################################################################################################################################
+
+    COBRA Post Processing Script
+
+                            NOT TO BE CHANGED BY DATABUREAU
+
+    
+    Modified to unify BSB/DNA & TV scripts
+
+    This is a standard script designed to called from an initiating script stored in each job template
+
+    The inbound parameters are:
+            the Initiating Host
+            the source job folder
+    
+    After checking everything is in order the script output check, Zip Outputs, create triggers, & copy to CobraShare.
+    
+	2021-11-29 - TOT 397 - KT - Created from the TV delivery Script
+    2021-11-30 - TOT 397 - KT - Updated to retain case in the zip filename 
+    2021-12-01 - TOT 397 - KT - Updated to allow the cobrashare foldername to be flexible
+    2021-12-01 - TOT 397 - KT - Updated to include a new configitem for copying additional files to CobraShare
+    2021-12-01 - TOT 397 - KT - Updated to fix issue with configuration file name generation
+    2021-12-13 - TOT 397 - KT - Updated to allow for wildcards in output file specifications
+    2022-01-27 - TOT 417 - KT - Remove the Log Archiving this is not adding value
+    2022-05-10 - TOT 443 - KT - Add JobType to Config and determine JobOutputFolder based on JobType
+                                Add Tag replacements for config file for JobNumber 
+                                Put Tag replacements for config into 1 statement instead of each line
+                                Updated to identify Adhoc jobs and replace tags accordingly
+    2022-07-26 - TOT 443 - KT - Rewritten means to import config using function returning a collection of settings rather than separate variables
+    2023-07-08 - KT - TOT 530 - Added Call to retrieve BI reports and validation for where BWF reports are missing
+    2023-07-11 - KT - TOT 530 - Add Optional Parameter which if not 0 is used to choose JobId for selecting Report
+    2023-10-03 - KT - TOT 590 - ReportMandatory set True where config value = Yes - this was incorrectly checking for Just Y
+    2023-10-18 - KT - TOT 594a- Implement action which sends data to the Shape Environment for report purposes.
+    2023-10-26 - KT - TOT 595 - Don't call Report Retrieval for BSB jobs
+    2024-02-16 - KT - TOT 595 - Add time to Log file name so we can track the BWF timeout problems better
+    2024-02-16 - KT - TOT 595 - Record Username in log file
+    2024-02-20 - KT - TOT 612 - New configitem for LBG 'FullZipName' - this retains the file extension in generating zip name 
+    2024-02-23 - KT - TOT 623 - Send an email notification when script completes
+    2024-02-25 - KT - TOT 624 - Include option to exclude specific output files from sending to Shape
+    2024-02-25 - KT - TOT 613 - Add new config Item UseBIReport - Flag to override report used for TV Repeat jobs - default is BWF, this overrides to use BI report
+    2024-02-26 - KT - TOT 613 - Needed to add [boolean] to the new parameter to pass to the Get-ReportFiles function
+    2024-03-07 - KT - TOT 626 - Need to pass OutputSubfolder as a parameter to Get-ReportFiles
+    2024-04-02 - KT - TOT 633 - Apply the Get-FixedLengthRowCount function for fixed length files
+                    
+<##################################################################################################################################################>
+
+param
+(
+    [String] $HostName,
+    [String] $JobFolder,
+    [int]    $JobId = 0
+)
+
+<# Test Data
+  $HostName     = 'VALWINLVAPP027'
+  $JobFolder    = '\\VALWINLVAPP030\bsbappend$\Jobs\CDA0008492_202404\'
+  $JobId = 0        
+  $DebugMode = $True
+  #$DebugMode = $False
+# test Data End #>
+
+# Load all the functions we may need from seperate modules
+. "\\VALWINLVAPP030\bsbappend$\Jobs\General\MonthlyTemplates\Scripts\ActionFunctions.ps1"
+. "\\VALWINLVAPP030\bsbappend$\Jobs\General\MonthlyTemplates\Scripts\ConfigFunctions.ps1"
+. "\\VALWINLVAPP030\bsbappend$\Jobs\General\MonthlyTemplates\Scripts\CreateSample.ps1"
+
+# setup Constants
+$CorrectHostNames = 'VALWINLVAPP027|VALWINLVAPP028|CRLWINLVAPP034|CRLWINLVAPP035|VALWINLVAPP070|VALWINLVAPP071|CRLWINLVAPP021|CRLWINLVAPP022'
+$SQLConfigFile    = "\\VALWINLVAPP030\bsbappend$\Jobs\Processing\PSScripts\Configuration\SQLConnectionCobraConfig.txt"
+$JobOutputFolder  = "OutputFiles\"
+$JobLogSubFolder  = "LogFiles\"
+$JobSourceFolder  = "SourceFiles\"
+$JobRefFolder     = "ReformattedFiles\"
+$CobraShareRoot   = "\\VALWINLVAPP030\CobraShare$\CreditSolutions\"
+$ShapeRoot        = "\\VALDOTCSCLU04S04\shape_ops_pci$\QC_Checks_Automation\Input\"
+$CRLF             = [char[]]::new(2);$CRLF[0]=[char](13);$CRLF[1]=[char](10)
+$JobNumberDate    = $JobFolder.ToUpper() | Split-Path  -Leaf
+
+if($JobNumberDate.Contains('_')) {
+    $JobNumber, $Jobdate = $JobNumberDate.split('_')
+    $Adhoc               = $False
+    $DeliveryRoot        = "\\VALWINLVAPP030\cobrashare$\DataTransfers\OutBound\RepeatTransfers"
+}
+else {
+    $JobNumber    = $JobNumberDate
+    $Jobdate      = ''
+    $Adhoc        = $True
+    $DeliveryRoot = "\\VALWINLVAPP030\cobrashare$\DataTransfers\OutBound"
+}
+
+$LogFileName      = "$($JobNumberDate)_PostProcessing_$(get-date -Format yyyyMMdd_HHmmss).log"
+$logFile          = join-path $JobFolder (join-path $JobLogSubFolder $LogFileName)
+$DeliveryLogFile  = join-path $JobFolder (join-path $JobLogSubFolder "$($JobNumberDate)_Output.log")
+
+
+##################################################################################################################################################
+# read the config data
+$ConfigList=@()
+$ConfigList = Read-Config  $JobFolder $JobNumberDate
+
+# Add some additional config items
+$CobraShare  = join-path $CobraShareRoot $(GetConfigValue $ConfigList "CobraShareFolder")
+$ConfigList += [pscustomobject]@{ Name = 'FullCobraShareFolder' ; Value ="$($CobraShare)" ;Target=""}
+$ConfigList += [pscustomobject]@{ Name = 'DeliveryFolder'   ; Value ="$(join-path $DeliveryRoot $JobNumber)"          ;Target=""}
+
+$ConfigFound = if($ConfigList) {$True} else {$False}
+
+##################################################################################################################################################
+
+Clear-Host
+Write-Log $logFile "Starting Post Process"
+Write-Log $logFile ("Job Number: " + $JobNumberDate)
+Write-Log $logFile ("User Name : " + $($Env:UserName)) 
+
+<##################################################################################################################################################>
+# Parameter and Config Validation
+
+$ErrorMessage=""
+
+if (($HostName -notmatch $CorrectHostNames) -and (!$Debugmode))     { $ErrorMessage = "$($CRLF)This script must be run on Handling Servers only!$($CRLF)Expected host name: $($CorrectHostNames.replace('|',' or '))$($CRLF)Current host name: $HostName" }
+elseif(!$ConfigFound)                                               { $ErrorMessage = "Config File not found $ConfigFile" }
+
+if( $ErrorMessage.Length -gt 0) {
+    Write-Log -AuditLogFile $logFile -AuditMessage $ErrorMessage -ErrorFound $true
+    Exit 
+}
+Write-Log $logFile ("Host name : $HostName" )
+
+<##################################################################################################################################################>
+# Process the Reports dealing with both BI Reports and BWF Reports  - This step can wait up to an hour for the BI reports to arrive
+
+# TOT 635 - First need to set JobID if it hasn't been provided
+$ConBWFE = Get-CobraTextConfig 'BWFE' $SQLConfigFile
+$ConMB21 = Get-CobraTextConfig 'MB21' $SQLConfigFile
+$JobID   = if($JobID -eq 0) {Get-JobID $JobNumberDate $ConBWFE} else {$JobId}
+
+
+# TOT 635 - Now get the Stats file - Extracted this from Get-ReportFiles as it applies to BSB too
+if($(Get-StatsFile $JobID $JobNumberDate $(Join-path $JobFolder "ConfigFiles") $ConMB21 $ConBWFE)) {
+    Write-Log $AuditLog "Stats File Downloaded"
+} else {
+    Write-Log $AuditLog "FAILED TO Download Stats File"
+}
+
+$ReportMandatory = if($(GetConfigValue $ConfigList "ReportMandatory") -eq "Yes") { $True } else {$False}
+
+# TOT 595
+if($ReportMandatory){
+    
+    # TOT 613 Additional paramter for TV reports
+    $OverrideTVReport = [boolean]$(GetConfigValue $ConfigList "UseBIReport")
+   
+    # TOT 626 - Need to pass OutputSubfolder as a parameter
+    $ReportResult = Get-ReportFiles -JobNumber $JobNumberDate -JobFolder $JobFolder -ReportMandatory $ReportMandatory -JobId $JobId -AuditLog $LogFile -UseBIReport $OverrideTVReport -OutputSubFolder $(GetConfigValue $ConfigList "JobOutputFolder")
+    
+    if(!$ReportResult) {
+        Write-Log -AuditLogFile $logFile -AuditMessage "Report Retrieval Failed" -ErrorFound $true
+        Exit 
+    }
+}
+
+##################################################################################################################################################
+# Setup the destinationfolders on CobraShare
+
+$OmitCobraShare  = $(GetConfigValue $ConfigList "OmitCobraShare")
+
+if (!$OmitCobraShare) {
+
+    
+    $CobraShareInput    = join-path $CobraShare 'Input'
+    $CobraShareOutput   = join-path $CobraShare 'Output'
+    $CobraShareConfig   = join-path $CobraShare 'Config'
+    $CobraShareReformat = join-path $CobraShare 'ReformattedFiles'
+
+    Create-Folder -FolderName $CobraShare         -AuditLog $logFile
+    Create-Folder -FolderName $CobraShareInput    -AuditLog $logFile
+    Create-Folder -FolderName $CobraShareOutput   -AuditLog $logFile
+    Create-Folder -FolderName $CobraShareConfig   -AuditLog $logFile
+    Create-Folder -FolderName $CobraShareReformat -AuditLog $logFile
+}
+
+##################################################################################################################################################
+# If there is no client output, remove final delivery script
+
+if( ($(GetConfigValue $ConfigList 'StandardDelivery') -ne 'Client') -and ($(GetConfigValue $ConfigList 'RawDelivery') -ne 'Client') ) {
+    
+    $DeliveryScript =  join-path $JobFolder  $(Join-path "ConfigFiles" "DO_FinalDelivery.ps1")
+
+    if($(test-path $DeliveryScript)) {
+        remove-item $DeliveryScript -Force
+    }
+}
+
+##################################################################################################################################################
+# Define some recurring variables
+
+$JobOutputFolder   = join-path $JobFolder $(GetConfigValue $ConfigList "JobOutputFolder")
+$ConfigVersion     = $(GetConfigValue $ConfigList "ConfigVersion")
+$CombinedZip       = $(GetConfigValue $ConfigList "CombinedZip")
+$StandardOutputZip = join-path $JobOutputFolder $(GetConfigValue $ConfigList "StandardOutputZip")
+$OutputFormat      = $(GetConfigValue $ConfigList "OutputFileType").tolower()
+$OutputDelimiter   = $(GetConfigValue $ConfigList "OutputDelimiter")
+$SendToShape       = $(GetConfigValue $ConfigList "SendToShape")
+$JobType           = $(GetConfigValue $ConfigList "JobType")
+$ShapeFolder       = join-path $(join-path $ShapeRoot $JobType) $JobNumber
+
+##################################################################################################################################################
+# Zipping Options are different between Configs.  Config 1 allows individual zips or one combined zip.  
+# Config 2 is fixed at a standard combined zip and a raw combined zip
+
+if($ConfigVersion -eq "1") {
+    
+    $RawOutputZip = $StandardOutputZip
+} else {
+    
+    $CombinedZip   = $True
+    $RawOutputZip  = join-path $JobOutputFolder $(GetConfigValue $ConfigList "RawOutputZip")
+}
+
+##################################################################################################################################################
+# Process any file renames there may be before further actions
+
+foreach($Rename in $($ConfigList | where{$_.Name -eq "RenameFile"}| select Value, Target)) {
+
+    Rename-File -SourceFile $(join-path $JobOutputFolder $Rename.Value) -NewName $Rename.Target -AuditLog $logFile
+}
+
+##################################################################################################################################################
+# Determine Actual output filenames allowing for wildcards
+
+$StandardOutputList=@()
+foreach ($OutputFile in $(GetConfigValue $ConfigList "OutputFileName")) { 
+
+    if(test-path $(join-path $JobOutputFolder $OutputFile)) {
+        $StandardOutputList += $(get-childitem($(join-path $JobOutputFolder $OutputFile))).Fullname
+    }
+}
+
+$RawOutputList=@()
+foreach ($OutputFile in $(GetConfigValue $ConfigList "RawOutputFilename")) { 
+
+    if(test-path $(join-path $JobOutputFolder $OutputFile)) {
+        $RawOutputList += $(get-childitem($(join-path $JobOutputFolder $OutputFile))).Fullname
+    }
+}
+
+# Check we have the correct number of files (only possible in later config versions)
+if ($ConfigVersion -ge "2") {
+    if ($(GetConfigValue $ConfigList "RequiredStandardOutput") -ne $StandardOutputList.count) {
+        
+        Write-Log $logFile "Missing Standard Output File(s) - Quitting"
+        Write-Log $logFile "Ending Post Process"
+        Exit 1
+    } 
+    elseif ($(GetConfigValue $ConfigList "RequiredRawOutput") -ne $RawOutputList.count) {
+        
+        Write-Log $logFile "Missing Raw Output File(s) - Quitting"
+        Write-Log $logFile "Ending Post Process"
+        Exit 1   
+    }
+}
+
+##################################################################################################################################################
+# Process Output Files - for each output we need to check it, count it, zip it and copy it
+
+$RecordCounts = @()
+foreach ($FileToProcess in $StandardOutputList) { #write-host $FileToProcess }
+        
+    #$FileToProcess = $StandardOutputList[0]
+    if(test-path $FileToProcess) {
+
+        Write-Log $logFile "Processing Output File: $FileToProcess"
+
+        # Output Checks and Record Counts, don't apply to pdf
+        if($(get-item $FileToProcess).Extension -eq '.pdf') {
+            $RecordCounts += [pscustomobject]@{ Name = "$($(get-item $FileToProcess).Name)" ; HeaderRecord="" ; ColumnCount=""; RecordLength=""; NullsFound=""; Count = 'N/A'}         
+        } else {
+        
+            # create a samples file then check the file generated
+            OutputSampleFile  -InputFile $FileToProcess -Delimiter $OutputDelimiter
+            
+            $FileData = Check-OutputFile -FilePath $(Get-SampleFilename $FileToProcess) -Delimiter $OutputDelimiter
+            
+            $FileData.Name = $(get-item $FileToProcess).Name
+            if ($SuppressRecordCounts) {
+                $FileData.Count = "N/A"
+            } elseif ($OutputFormat -eq 'fixed length') {
+                # TOT 633
+                $FileData.Count = $(Get-FixedLengthRowCount $FileToProcess)         
+            } else {
+                $FileData.Count = $(Get-RecordCount $FileToProcess)         
+            }
+            $RecordCounts += $FileData
+        }
+
+        if($CombinedZip) { 
+            Zip-File -ZipDestination $StandardOutputZip -FileToZip $FileToProcess -LogFile $logFile
+        }
+        else {
+            # Zip name is based on filename and copied immediately
+            # TOT 612 - New configitem for LBG - retain extension in zip name 
+            if($(GetConfigValue $ConfigList "FullZipName")) {
+                $TargetZip = "$(join-path $JobOutputFolder $(get-item $FileToProcess).name).zip"
+            }
+            else {
+                $TargetZip = "$(join-path $JobOutputFolder $(get-item $FileToProcess).basename).zip"
+            }
+            
+            Zip-File -ZipDestination $TargetZip -FileToZip $FileToProcess -LogFile $logFile
+
+            if(!$OmitCobraShare) { 
+                Copy-Files -SourceFileSpec $TargetZip -Destination $CobraShareOutput -AuditLog $logFile 
+            }
+            if($SendToShape) {
+                # TOT 624 - Only copy if doesn't match Exclusion list
+                if($(GetConfigValue $ConfigList "ShapeExclusion")| where {$_ -like $(Get-item($TargetZip)).Name}) {
+                    Write-Log $logFile "Excluding from Shape : $($(Get-item($TargetZip)).Name)"
+                }
+                else {
+                    Copy-Files -SourceFileSpec $TargetZip -Destination $ShapeFolder -AuditLog $logFile 
+                }
+            }
+        }
+    }
+    else {
+        Write-Log $logFile "Missing Output File: $FileToProcess"
+    }
+}
+
+# Raw output list only exists on version 2 and doesn't allow individual zips
+foreach ($FileToProcess in $RawOutputList) { 
+        
+    if(test-path $FileToProcess) {
+        
+        # create a samples file then check the file generated
+        OutputSampleFile  -InputFile $FileToProcess -Delimiter $OutputDelimiter
+            
+        $FileData = Check-OutputFile -FilePath $(Get-SampleFilename $FileToProcess) -Delimiter $OutputDelimiter
+            
+        $FileData.Name = $(get-item $FileToProcess).Name
+        if ($SuppressRecordCounts) {
+            $FileData.Count = "N/A"
+        } else {
+            $FileData.Count = $(Get-RecordCount $FileToProcess)         
+        }
+        $RecordCounts += $FileData
+
+        Zip-File -ZipDestination $RawOutputZip -FileToZip $FileToProcess -LogFile $logFile
+
+    }
+    else {
+        Write-Log $logFile "Missing Output File: $FileToProcess"
+    }
+}
+
+# finally copy over any combined zips now we have finished adding all files
+if($CombinedZip) {
+    if(!$OmitCobraShare)  { 
+        if (test-path $StandardOutputZip) {
+            Copy-Files -SourceFileSpec $StandardOutputZip -Destination $CobraShareOutput -AuditLog $logFile 
+        }
+        if ((test-path $RawOutputZip) -and ($RawOutputZip -ne $StandardOutputZip)) {
+            Copy-Files -SourceFileSpec $RawOutputZip      -Destination $CobraShareOutput -AuditLog $logFile 
+        }
+    } 
+    if($SendToShape)  { 
+        if (test-path $StandardOutputZip) {
+            Copy-Files -SourceFileSpec $StandardOutputZip -Destination $ShapeFolder -AuditLog $logFile 
+        }
+        if ((test-path $RawOutputZip) -and ($RawOutputZip -ne $StandardOutputZip)) {
+            Copy-Files -SourceFileSpec $RawOutputZip      -Destination $ShapeFolder -AuditLog $logFile 
+        }
+    } 
+}
+
+##################################################################################################################################################>
+# Need to write away the record counts so CBC can generate the emails easily.  Two versions initially 
+
+Write-DeliveryLog $ConfigList $RecordCounts $DeliveryLogFile
+
+
+##################################################################################################################################################>
+# Zip and Copy Reformatted Files
+
+$ReformattedFile = join-path $JobFolder (join-path $JobRefFolder $(GetConfigValue $ConfigList "ReformattedFile"))
+$ReformattedZip  = join-path $JobFolder (join-path $JobRefFolder $(GetConfigValue $ConfigList "ReformattedZip"))
+
+if(test-path $ReformattedFile) {
+    Zip-File  -ZipDestination $ReformattedZip -FileToZip $ReformattedFile -LogFile $logFile
+    if (!$OmitCobraShare) {
+        Copy-Files -SourceFileSpec $ReformattedZip -Destination $CobraShareReformat -AuditLog $logFile 
+    }
+}
+else {
+    Write-Log $logFile "Missing Reformat File: $ReformattedFile"
+}
+
+##################################################################################################################################################>
+# Zip and Copy Source Files
+
+$SourceZip   = join-path $JobFolder (join-path $JobSourceFolder $(GetConfigValue $ConfigList "SourceZip"))
+
+foreach( $File in $(GetConfigValue $ConfigList "SourceFile")) {
+    
+    $SourceFile = join-path $JobFolder (join-path $JobSourceFolder $File )
+    Zip-File   -ZipDestination $SourceZip -FileToZip   $SourceFile      -LogFile $logFile
+    if (!$OmitCobraShare) {
+        Copy-Files -SourceFileSpec $SourceZip -Destination $CobraShareInput -AuditLog $logFile 
+    }
+}
+
+##################################################################################################################################################>
+# All the other ancilliary file copies to CobraShare
+
+if (!$OmitCobraShare) {
+    
+    $CopyList = $($ConfigList | where{$_.Name -eq "CobraShareCopy"}| select Value, Target)
+    
+    foreach ($Request in $CopyList) { 
+        #$Request = $CopyList[0]
+
+        $SourceSpec = join-path $JobFolder  $Request.Value
+        $Target     = join-path $CobraShare $Request.Target
+    
+        if(test-path $SourceSpec) {
+            Copy-Files -SourceFileSpec $SourceSpec -Destination $Target -AuditLog $logFile
+        }
+        else {
+            Write-Log $logFile "No Files Found to copy matching : $SourceSpec"
+        }
+    }
+}
+
+Write-Log $logFile "Ending Post Process"
+
+##################################################################################################################################################>
+# TOT 623 Send a notification Email
+
+$EmailFrom        = "Cobra Handling <ukdatabureau@transunion.com>"
+$EmailTo          = "ukdatabureau@transunion.com"
+$EmailSubject     = "$JobNumberDate - Post Processing - Finished"
+$EmailBody        = "Please check the logs in $($(get-item $logFile).Name) to verify everything is OK"
+$EmailServer      = "SMTPrelay.cig.local"
+$EmailPort        = 25
+
+try {
+    Send-MailMessage -From $EmailFrom -To $EmailTo -Subject $EmailSubject -Body $EmailBody -SmtpServer $EmailServer -Port $EmailPort
+    Write-Log $logFile "Send Mail Message - OK" 
+}
+catch {
+    Write-Log $logFile "Send Mail Message - FAILED - $_" 
+}
+
+Exit 0
+##################################################################################################################################################>
