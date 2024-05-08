@@ -1,3 +1,144 @@
+$connectionString = "Data Source=YourServer;Initial Catalog=YourDatabase;Integrated Security=True"
+$connection = New-Object System.Data.SqlClient.SqlConnection($connectionString)
+$currentUserName = $env:USERNAME
+# Load all the functions we may need 
+. "\\VALWINLVAPP030\bsbappend$\Jobs\General\MonthlyTemplates\Scripts\ActionFunctions.ps1"
+# Function to execute a SQL command
+
+
+# Main script starts here
+
+If (Get-FileViewData)
+{
+    # Emulate business logic conditions
+    $blnProcess = $true
+    if ($jobNumber -eq "No Matches" -or $jobNumber -eq "Multiple Matches") {
+        $blnProcess = $false
+        Write-Host "File has $jobNumber with jobs"
+    } elseif ($jobNumber -like "*NA") {
+        $blnProcess = $false
+        Write-Host "Cannot process as $jobNumber is inactive"
+    }
+
+    # Check file existence using a placeholder function
+    $fileCheck = CheckFileExists "FileID" "JobNumber" 
+
+    If ($fileCheck -eq "not in view" -or $fileCheck -eq "trigger notfound")
+        {
+         $blnProcess = $false
+        }
+
+    # SQL checks and locking logic
+    if ($blnProcess) {
+        $sql = "SELECT * FROM dbo.vw_CT_CheckFile WHERE fileid = '$FileID'" 
+        $table = Query-SQL $sql
+        if ($table.Rows.Count -gt 0) {
+            $row = $table.Rows[0]
+            if ($null -ne $row["FileUser"]) {
+                if ($row["FileUser"].ToLower().Trim() -eq $currentUserName.ToLower().Trim()) {
+                    # Current user, so OK
+                } else {
+                    Write-Host "File already in use by $($row["FileUser"].Trim())"
+                    $blnProcess = $false
+                }
+            } else {
+                # Lock the file logic
+                $sql = "INSERT INTO dbo.CT_FileLock (FileID, Source, FileUser, dts) VALUES ($FileID, $Source, $currentUserName, GETDATE())"
+                Execute-SQLCommand $sql
+            }
+        } else {
+            Write-Host "File no longer available to process, reject it and refresh data"
+            $blnProcess = $false
+        }
+    }
+
+    if ($blnProcess) {
+        $source = $table.Rows[0]["Source"]
+        $fileID = $table.Rows[0]["FileID"]
+        if ($source -eq "E") {
+            if ($fileCheck -ne "OK") {
+                Write-Host "This file or version of it $fileCheck, Reject it and Refresh Data"
+                ClearFileLock $fileID "E"
+                $blnProcess = $false
+            }
+        } else {
+            if ($fileCheck -ne "OK") {
+                Write-Host "This file or version of it $fileCheck, Reject it and Refresh Data"
+                ClearFileLock $fileID "I"
+                $blnProcess = $false
+            }
+        }
+    }
+
+     #Continue processing if the file is still okay to process
+    if ($blnProcess) {
+        $source = $table.Rows[0]["Source"]
+        $createdDate = $table.Rows[0]["CreatedDate"]
+        $updatedDate = $table.Rows[0]["UpdatedDate"]
+
+        # Determine the most recent date between created and updated dates
+        if ($createdDate -gt $updatedDate) {
+            $strDate = $createdDate.ToString("dd MMM yyyy HH:mm")
+        } else {
+            $strDate = $updatedDate.ToString("dd MMM yyyy HH:mm")
+        }
+
+    # Check and update job run details
+    if ($blnProcess) {
+        $sql = "INSERT INTO dbo.CT_JobRun (CT_JobID, fileid, FileSource, RunNo, CreatedBy, createddate, RunStatus, DueByDate) "
+        $sql += "SELECT ct_JobID, $FileID, $Source, case when LastRun > LastNeptuneRun then LastRun+1 else LastNeptuneRun+1 end, "
+        $sql += "$currentUserName, GETDATE(), 'Logged', dbo.fn_CallTraceDueDate_New($strDate, j.job_number) "
+        $sql += "FROM dbo.vw_CallTraceJobList v INNER JOIN dbo.ct_jobs j ON v.job_number = j.job_number "
+        $sql += "WHERE v.job_number = '$jobNumber'"
+        Execute-SQLCommand $sql
+
+        Write-Host "Linking file to job number $jobNumber"
+
+        # Clear any locks if necessary
+        ClearFileLock "FileID" "Source"  # Placeholder function call
+    }
+
+    # Additional job setup logic
+    function SetupJob($status, $jobNumber, $runNumber, $folder, $fileName, $client, $runID) {
+        # Add your implementation
+        Write-Host "Setting up job for run ID: $runID"
+    }
+
+}
+    
+}
+
+
+
+
+--------------------------------
+
+
+
+
+function ExecuteSQLCommand ($sql) {
+    $command = $connection.CreateCommand()
+    $command.CommandText = $sql
+    $connection.Open()
+    $command.ExecuteNonQuery()
+    $connection.Close()
+}
+
+# Function to query SQL and return results
+function QuerySQL ($sql) {
+    $command = $connection.CreateCommand()
+    $command.CommandText = $sql
+    $connection.Open()
+    $result = $command.ExecuteReader()
+    $table = New-Object System.Data.DataTable
+    $table.Load($result)
+    $connection.Close()
+    return $table
+}
+function ClearFileLock($fileID, $fileSource) {
+    $sql = "EXECUTE [dbo].[up_CT_ClearFileLock] $fileID, '$fileSource'"
+    Execute-SQLCommand $sql
+}
 
 Function ClearFileLock($fileID, $fileSource) {
     $sql = "EXECUTE [dbo].[up_CT_ClearFileLock] $fileID, '$fileSource'"
@@ -138,5 +279,39 @@ function CheckFileExists_EFT([int]$lngFileID, [string]$jobNumber, [bool]$headerI
     } elseif (Test-Path $fileFoundEmptyPath) {
         DeleteFile $fileFoundEmptyPath
         return "Is empty"
+    }
+}
+
+function Write-Log {
+    Param(  [String] $AuditLogFile,
+            [String] $AuditMessage,
+            $ErrorFound )
+
+    $MyDate = get-date
+
+    [string]$FullMessage = $MyDate.ToLongDateString() + "|" + $MyDate.ToLongTimeString() + "|" + $AuditMessage
+
+    if($ErrorFound) {
+        write-Host  $AuditMessage -ForegroundColor Red
+    }
+    else {
+        write-Host  $AuditMessage -ForegroundColor White
+    }
+
+    # can get hung up due to network latency - so include retry
+    $MaxTries = 10
+    while( !$Completed) {
+        try {
+            Add-Content $AuditLogFile ($FullMessage) -erroraction Stop
+            $Completed = $True
+        }
+        catch {
+            Start-Sleep -Seconds 2
+            $MaxTries -= 1
+        }
+        if( $MaxTries -lt 0 ){ 
+            write-host "Failed to write to log: $FullMessage" 
+            $Completed = $True
+        }
     }
 }
