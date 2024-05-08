@@ -1,0 +1,440 @@
+
+function Read-Config {
+    param ([string]$JobFolder, [String]$JobNumberDate)
+    # Test Data
+    # $JobFolder ="\\VALWINLVAPP030\bsbappend$\Jobs\CDA0010243\"; $JobNumberDate="CDA0010243"
+        
+    $JobNumber, $Jobdate = $JobNumberDate.split('_')
+
+    # could be one of two name formats
+    $AutoConfig   = join-path $(join-path $JobFolder "configfiles")  "$($JobNumber)_PostProcessingConfigAuto.txt"
+    $ManualConfig = join-path $(join-path $JobFolder "configfiles")  "$($JobNumber)_PostProcessingConfig.txt"
+    
+    # Auto configs will be created by the Check List process but can be overridden by a manual config, so manual config takes precedence
+    if ($(Test-path $ManualConfig)) {
+        $ConfigList  = Read-ManualConfig $ManualConfig $JobNumberDate
+    }
+    elseif ($(Test-path $AutoConfig)) {
+        $ConfigList  = Read-AutoConfig $AutoConfig $JobNumberDate
+    }
+    else {
+        $ConfigList = $False
+    }
+
+    return $ConfigList
+}
+
+############################################################################################################################################>
+# Original Config files were created manually - still need to accomodate them
+function Read-ManualConfig {
+    param ([string]$ConfigFile, [String]$JobNumberDate)
+    
+    #$ConfigFile = "\\VALWINLVAPP030\bsbappend$\Jobs\CDA102262a_202403\ConfigFiles\CDA102262a_PostProcessingConfig.txt"; $JobNumberDate="CDA102262a_202403"
+
+    if(Test-path $ConfigFile) { 
+
+        #TOT 626
+        $JobFolder = $(get-item $ConfigFile).Directory.Parent.FullName
+        
+        $JobNumber, $Jobdate = $JobNumberDate.split('_')
+
+        # Get Client Name from Neptune Job
+        $ClientName = GetClientName $JobNumber
+    
+        # Get the required details from the config - Output files will be a collection, others single variables
+        $ConfigFound= $true
+        $ConfigData = get-content $ConfigFile
+
+        # Some older bespoke filenames have different variations of the date
+        if( $JobDate.length -ge 6) {
+            $JobYear  = $JobDate.substring(0,4)
+            $JobMonth = $JobDate.substring(4,2)
+        }
+
+        # Replace tags
+        $ConfigData = $ConfigData.Replace('<JobNumber>_<JobDate>',$JobNumberDate).Replace('<JobNumber>',$JobNumber).Replace('<JobDate>',$JobDate).Replace('<ClientCobraShareFolder>',$ClientName).Replace('<JobYear>',$JobYear).Replace('<JobMonth>',$JobMOnth)
+    
+        $ConfigList = @()    
+        $ConfigList += [pscustomobject]@{ Name = 'ConfigVersion' ; Value = "1"}
+
+        $FirstFile = ""
+        Foreach ($Item in $($ConfigData | where{$_ -like 'RequiredOutput|*'})) {
+            if(!$FirstFile) {
+                $FirstFile = $Item.Split("|")[1].trim()
+            }
+            $ConfigList += [pscustomobject]@{ Name = 'OutputFilename' ; Value = $Item.Split("|")[1].trim();Target=''}
+        }
+
+        # Derive output type 
+        if( $FirstFile.substring($FirstFile.length -4,4).tolower() -eq '.csv' ) {
+        
+             $ConfigList += [pscustomobject]@{ Name = 'OutputFileType'  ; Value = "Delimited"    ;Target=""}
+             $ConfigList += [pscustomobject]@{ Name = 'OutputDelimiter' ; Value = ","            ;Target=""} 
+        } else {
+             $ConfigList += [pscustomobject]@{ Name = 'OutputFileType'  ; Value = "Fixed Length" ;Target=""}
+        }
+
+        If($($ConfigData  | where{$_ -like 'FullZipName|True'})) { 
+            $ConfigList += [pscustomobject]@{ Name = 'FullZipName' ; Value= $True; Target=''}
+        }
+        else {
+            $ConfigList += [pscustomobject]@{ Name = 'FullZipName' ; Value= $False; Target=''}
+        }
+        
+        If($($ConfigData  | where{$_ -like 'OmitCobraShare|True'})) { 
+            $ConfigList += [pscustomobject]@{ Name = 'OmitCobraShare' ; Value= $True; Target=''}
+        }
+        else {
+            $ConfigList += [pscustomobject]@{ Name = 'OmitCobraShare' ; Value= $False; Target=''}
+        }
+        
+        If($($ConfigData  | where{$_ -like 'SendToShape|True'})) { 
+            
+            $ConfigList += [pscustomobject]@{ Name = 'SendToShape' ; Value= $True; Target=''}
+            # TOT 624 
+            foreach ($Item in $($ConfigData | where{$_ -like 'ShapeExclusion|*'})) {
+                $ConfigList += [pscustomobject]@{ Name = 'ShapeExclusion' ; Value = $Item.Split("|")[1].trim()}
+            }
+        }
+        else {
+            $ConfigList += [pscustomobject]@{ Name = 'SendToShape' ; Value= $False; Target=''}
+        }
+        
+        Foreach ($Item in $($ConfigData | where{$_ -like 'CobraShareCopy|*'})) {
+            $ConfigList += [pscustomobject]@{ Name = 'CobraShareCopy' ; Value = $Item.Split("|")[1].trim();Target = $Item.Split("|")[2].trim()}
+        }
+        
+        Foreach ($Item in $($ConfigData | where{$_ -like 'CobraShareFolder|*'}|Select -First 1)) {
+            $ConfigList += [pscustomobject]@{ Name = 'CobraShareFolder' ; Value = $Item.Split("|")[1].trim();Target = ''}
+        }
+        
+        If($($ConfigData  | where{$_ -like 'CombinedZip|True'})) { 
+            $ConfigList += [pscustomobject]@{ Name = 'CombinedZip' ; Value= $True; Target=''}
+            $ConfigList += [pscustomobject]@{ Name = 'StandardOutputZip' ; Value= $($($ConfigData | where{$_ -like 'CombinedZipName|*'} | Select -First 1).tostring().Split("|")[1].trim()); Target=''}
+        }
+        else {
+            $ConfigList += [pscustomobject]@{ Name = 'CombinedZip' ; Value= $False; Target=''}
+        }
+        
+        $ConfigList += [pscustomobject]@{ Name = 'ReformattedFile'; Value= $($($ConfigData | where{$_ -like 'ReformattedFile|*'} | Select -First 1).tostring().Split("|")[1].trim()); Target=''}
+        $ConfigList += [pscustomobject]@{ Name = 'ReformattedZip' ; Value= $($($ConfigData | where{$_ -like 'ReformattedZip|*'} | Select -First 1).tostring().Split("|")[1].trim()); Target=''}
+
+        $JobSourceFolder = $(get-item $ConfigFile).Directory.tostring().tolower().Replace("configfiles","SourceFiles")
+        $SourceSpecs     = $($ConfigData | where{$_ -like 'SourceFile|*'}).tostring().Split("|")[1].trim().split(";")
+
+        $SourceFiles =@()
+        foreach($SourceSpec in $SourceSpecs) {
+            $SourceFiles +=  get-childitem $(join-path $JobSourceFolder $SourceSpec) -file
+        }
+        foreach($SourceFile in $SourceFiles) {
+            $ConfigList += [pscustomobject]@{ Name = 'SourceFile' ; Value=$SourceFile.Name; Target=''}
+        }       
+        $ConfigList += [pscustomobject]@{ Name = 'SourceZip'  ; Value= $($($ConfigData | where{$_ -like 'SourceZip|*'} | Select -First 1).tostring().Split("|")[1].trim()); Target=''}
+        
+        # TOT 508 Set Job Type as variable for clarity
+        $JobType = $($ConfigData | where{$_ -like 'JobType|*'}).tostring().Split("|")[1].trim()
+        if(!$JobType) {
+            $JobType = 'BSB'
+        }
+    
+        $ConfigList += [pscustomobject]@{ Name = 'JobType' ; Value= $JobType; Target=''}
+        
+        # TOT 508 - Add rename of refused file
+        if($JobType -eq "TV" ) {
+            $ConfigList += [pscustomobject]@{ Name = 'RenameFile' ; Value ="refused.$($JobNumberDate)_TrueVision.csv";Target="$($JobNumberDate)_Refused.csv"}
+            $ConfigList += [pscustomobject]@{ Name = 'ReportMandatory' ; Value ="Yes";Target=""}
+        }
+        #$JobType = "DataDNA"
+        if($JobType -Like "*DNA*" ) {
+            
+            # TOT 626
+            if(test-path $(join-path $JobFolder 'output') ) {
+                $ConfigList += [pscustomobject]@{ Name = 'JobOutputFolder' ; Value="Output\"; Target=''}
+            }
+            else {
+                $ConfigList += [pscustomobject]@{ Name = 'JobOutputFolder' ; Value="OutputFiles\"; Target=''}
+            }
+            $ConfigList += [pscustomobject]@{ Name = 'ReportMandatory' ; Value ="Yes";Target=""}
+        }
+        else {
+            $ConfigList += [pscustomobject]@{ Name = 'JobOutputFolder' ; Value="OutputFiles\"; Target=''}
+        }
+
+        if($($ConfigData | where{$_ -like 'ClientName|*'} )) {
+            $ConfigList += [pscustomobject]@{ Name = 'ClientName'    ; Value = $($ConfigData | where{$_ -like 'ClientName|*'} ).Split("|")[1].trim() ;Target=""}
+        } else {
+            $ConfigList += [pscustomobject]@{ Name = 'ClientName'    ; Value = $ClientName                                                           ;Target=""}
+        }
+        
+        # TOT 508 - Add Delivery options for use in Output log
+        $StandardDelivery = $($ConfigData | where{$_ -like 'BSBDataUse|*'} ).Split("|")[1].Replace(' Use','').Replace('Not Required','None')
+        $RawDelivery      = $($ConfigData | where{$_ -like 'RawDataUse|*'} ).Split("|")[1].Replace(' Use','').Replace('Not Required','None')
+        
+        if($StandardDelivery) {
+            $ConfigList += [pscustomobject]@{ Name = 'StandardDelivery' ; Value = $StandardDelivery  ;Target=""}
+        }
+        if($RawDelivery) {
+            $ConfigList += [pscustomobject]@{ Name = 'RawDelivery'      ; Value = $RawDelivery       ;Target=""}
+        }
+
+        # TOT 613 - Flag to override which report is used for TV Repeat jobs - default is BWF, this overrides to use BI report
+        If($($ConfigData  | where{$_ -like 'UseBIReport|True'})) { 
+            $ConfigList += [pscustomobject]@{ Name = 'UseBIReport' ; Value= $True; Target=''}
+        }
+    }
+    else {
+        $ConfigList= $false
+    }
+    Return $ConfigList
+}
+
+############################################################################################################################################>
+# return a selected value or collection from the Config List to make the pp script read more easily
+
+function GetConfigValue {
+    param ($ConfigList, $ConfigItem)
+    # $ConfigItem = "OutputFileName"
+    
+    return $($ConfigList | where{$_.Name -eq $ConfigItem}| select Value).Value 
+
+}
+
+############################################################################################################################################>
+# Later Config files have .csv extensions and were created manually by CheckList Process directly from Parameter Form
+function Read-AutoConfig {
+    param ([string]$ConfigFile, [String]$JobNumberDate)
+    
+    # Test data
+    # $ConfigFile = "\\VALWINLVAPP030\bsbappend$\Jobs\CDA0010243\CDA0010243_PostProcessingConfigAuto.txt"
+    # $JobNumberDate="CDA0010243"
+    
+    if(Test-path $ConfigFile) { 
+
+        #TOT 626
+        $JobFolder = $(get-item $ConfigFile).Directory.Parent.FullName
+        
+        $JobNumber, $Jobdate = $JobNumberDate.split('_')
+        if( $JobNumberDate.contains('_')) {
+            $Adhoc = $False
+        } else {
+            $Adhoc = $True
+        }
+        
+        # Get Client Name from Neptune Job
+        $ClientName = GetClientName $JobNumber
+    
+        # Get the required details from the config - Output files will be a collection, others single variables
+        $ConfigFound= $true
+        $ConfigData = get-content $ConfigFile
+    
+        # Some older bespoke filenames have different variations of the date
+        if( $JobDate.length -ge 6) {
+            $JobYear  = $JobDate.substring(0,4)
+            $JobMonth = $JobDate.substring(4,2)
+        }
+
+        # Replace tags
+        $ConfigData = $ConfigData.Replace('<JobNumber>_<JobDate>',$JobNumberDate).Replace('<JobNumber>',$JobNumber).Replace('<JobDate>',$JobDate).Replace('<ClientCobraShareFolder>',$ClientName).Replace('<JobYear>',$JobYear).Replace('<JobMonth>',$JobMOnth)
+        
+        # Build configlist
+        $ConfigList = @()    
+        $ConfigList += [pscustomobject]@{ Name = 'ConfigVersion' ; Value = "2"; Target=""}
+
+        # Determine details to generate filenames
+        $Jobtype  = $($ConfigData | where{$_ -like 'RequestVersion|*'} ).Split("|")[1].Substring(0,3).Replace("Tru","TV").Replace("Dat","DNA")
+        $OutExt   = $($ConfigData | where{$_ -like 'OutputFileType|*'} ).Split("|")[1].Replace("Delimited","csv").Replace("Fixed Length","txt")
+        
+        $ConfigList += [pscustomobject]@{ Name = 'OutputFileType'    ; Value = $($ConfigData | where{$_ -like 'OutputFileType|*'} ).Split("|")[1];Target=""}
+        
+        # Delimited files need a delimiter which is comma by default
+        if($($ConfigData | where{$_ -like 'OutputFileType|Delimited'} )) {
+            if($($ConfigData | where{$_ -like 'OutputDelimiter|*'} )) {
+                $ConfigList += [pscustomobject]@{ Name = 'OutputDelimiter' ; Value = $($ConfigData | where{$_ -like 'OutputDelimiter|*'} ).Split("|")[1];Target=""}
+            } else {
+                $ConfigList += [pscustomobject]@{ Name = 'OutputDelimiter' ; Value ="," ;Target=""}
+            }
+        }
+                
+        $ConfigList += [pscustomobject]@{ Name = 'JobType'           ; Value = $Jobtype                                                          ;Target=""}
+        if($($ConfigData | where{$_ -like 'ClientName|*'} )) {
+            $ClientName = $($ConfigData | where{$_ -like 'ClientName|*'} ).Split("|")[1].trim()
+        }
+        $ConfigList += [pscustomobject]@{ Name = 'ClientName'    ; Value = $ClientName                                                       ;Target=""}
+
+        
+        if($($ConfigData | where{$_ -like 'OverrideStandardZipName|*'} )) {
+            $ConfigList += [pscustomobject]@{ Name = 'StandardOutputZip' ; Value = $($ConfigData | where{$_ -like 'OverrideStandardZipName|*'} ).Split("|")[1] ;Target=""}
+        } else {
+            $ConfigList += [pscustomobject]@{ Name = 'StandardOutputZip' ; Value = "$($JobNumberDate)_$($Jobtype)_Output.zip"                                  ;Target=""}
+        }
+        
+        if($($ConfigData | where{$_ -like 'OverrideRawZipName|*'} )) {
+            $ConfigList += [pscustomobject]@{ Name = 'RawOutputZip' ; Value = $($ConfigData | where{$_ -like 'OverrideRawZipName|*'} ).Split("|")[1] ;Target=""}
+        } else {
+            $ConfigList += [pscustomobject]@{ Name = 'RawOutputZip' ; Value = "$($JobNumberDate)_Raw_Output.zip"                                     ;Target=""}
+        }       
+
+        # Delivery Variables
+        $StandardDelivery = $($ConfigData | where{$_ -like 'BSBDataUse|*'} ).Split("|")[1].Replace(' Use','').Replace('Not Required','None')
+        $RawDelivery      = $($ConfigData | where{$_ -like 'RawDataUse|*'} ).Split("|")[1].Replace(' Use','').Replace('Not Required','None')
+        
+        $ConfigList += [pscustomobject]@{ Name = 'StandardDelivery' ; Value = $StandardDelivery  ;Target=""}
+        $ConfigList += [pscustomobject]@{ Name = 'RawDelivery'      ; Value = $RawDelivery       ;Target=""}
+        
+        # Job Type Specific Values
+        if($Jobtype -eq 'BSB' ) {
+
+            $TypeFlag     =  "Cobra"
+            $OutputFolder =  "OutputFiles\"
+           
+            if($($ConfigData | where{$_ -like 'OverrideBSBName|*'} )) {
+                
+                $ConfigList += [pscustomobject]@{ Name = 'OutputFilename' ; Value = $($ConfigData | where{$_ -like 'OverrideBSBName|*'} ).Split("|")[1] ;Target=""}
+            } else {
+    
+                $ConfigList   += [pscustomobject]@{ Name = 'OutputFilename'         ; Value ="$($JobNumberDate)_$TypeFlag.bsb.$OutExt";Target=""}
+            }
+            
+            # record how many standard files are required
+            $ConfigList   += [pscustomobject]@{ Name = 'RequiredStandardOutput' ; Value ="1";Target=""}
+            
+        }
+        elseif($Jobtype -eq 'TV' ) {
+
+            # refused file name is non standard so always needs renaming
+            $ConfigList += [pscustomobject]@{ Name = 'RenameFile' ; Value ="refused.$($JobNumberDate)_TrueVision.csv";Target="$($JobNumberDate)_Refused.csv"}
+
+            $TypeFlag     =  "TrueVision"
+            $OutputFolder =  "OutputFiles\"
+            $ConfigList   += [pscustomobject]@{ Name = 'OutputFilename' ; Value ="$($JobNumberDate)_$TypeFlag.$OutExt" ;Target=""}
+            $ConfigList   += [pscustomobject]@{ Name = 'OutputFilename' ; Value ="$($JobNumberDate)_Refused.$OutExt"   ;Target=""}
+            
+            # For Adhoc we Now use BI Reports which have a slightly different naming convention
+            if($Adhoc) {
+                $ConfigList   += [pscustomobject]@{ Name = 'OutputFilename' ; Value ="$($JobNumberDate)_TrueVision_ClientMI.pdf"      ;Target=""}
+            } else {
+                $ConfigList   += [pscustomobject]@{ Name = 'OutputFilename' ; Value ="$($JobNumberDate)_ClientMI.pdf"      ;Target=""}
+            }
+            
+            # record how many standard files are required
+            $ConfigList   += [pscustomobject]@{ Name = 'RequiredStandardOutput' ; Value ="3";Target=""}
+            $ConfigList   += [pscustomobject]@{ Name = 'ReportMandatory' ; Value ="Yes";Target=""}
+        }
+        elseif($Jobtype -eq 'DNA') {
+             # TOT 626
+            if(test-path $(join-path $JobFolder 'output') ) {
+                $OutputFolder = "Output\"
+            }
+            else {
+                $OutputFolder = "OutputFiles\"
+            }
+                        
+            # record how many standard files are required
+            $ConfigList   += [pscustomobject]@{ Name = 'RequiredStandardOutput' ; Value ="3";Target=""}
+            $ConfigList   += [pscustomobject]@{ Name = 'ReportMandatory' ; Value ="Yes";Target=""}
+        }
+
+        # Raw Data Outputs
+        if($($ConfigData | where{$_ -like 'RawAddressLinks|Yes'})) { $ConfigList += [pscustomobject]@{ Name = 'RawOutputFilename' ; Value ="$($JobNumberDate)_$TypeFlag.addresslinks.$OutExt";Target=""}}
+        if($($ConfigData | where{$_ -like 'RawBAI|Yes'} ))         { $ConfigList += [pscustomobject]@{ Name = 'RawOutputFilename' ; Value ="$($JobNumberDate)_$TypeFlag.bai.$OutExt"         ;Target=""}}
+        if($($ConfigData | where{$_ -like 'RawCCJ|Yes'} ))         { $ConfigList += [pscustomobject]@{ Name = 'RawOutputFilename' ; Value ="$($JobNumberDate)_$TypeFlag.ccj.$OutExt"         ;Target=""}}
+        if($($ConfigData | where{$_ -like 'RawCIFAS|Yes'} ))       { $ConfigList += [pscustomobject]@{ Name = 'RawOutputFilename' ; Value ="$($JobNumberDate)_$TypeFlag.cifas.$OutExt"       ;Target=""}}
+        if($($ConfigData | where{$_ -like 'RawER|Yes'} ))          { $ConfigList += [pscustomobject]@{ Name = 'RawOutputFilename' ; Value ="$($JobNumberDate)_$TypeFlag.er.$OutExt"          ;Target=""}}
+        if($($ConfigData | where{$_ -like 'RawSearches|Yes'} ))    { $ConfigList += [pscustomobject]@{ Name = 'RawOutputFilename' ; Value ="$($JobNumberDate)_$TypeFlag.searches.$OutExt"    ;Target=""}}
+        if($($ConfigData | where{$_ -like 'RawSHARE|Yes'} ))       { $ConfigList += [pscustomobject]@{ Name = 'RawOutputFilename' ; Value ="$($JobNumberDate)_$TypeFlag.share.$OutExt"       ;Target=""}}
+        
+        if($($ConfigData | where{ ($_ -like 'RawSHARE|Standard Raw Data') -or ($_ -like 'RawSHARE|Analytical Raw Data') } )) { 
+            $ConfigList += [pscustomobject]@{ Name = 'RawOutputFilename' ; Value ="$($JobNumberDate)_$TypeFlag.share.$OutExt" ;Target=""}
+        }
+        # record how many raw files are required
+        $RawFiles = @()
+        $RawFiles += $($ConfigList | where { $_.Name -eq "RawOutputFilename"})
+        $ConfigList   += [pscustomobject]@{ Name = 'RequiredRawOutput' ; Value ="$($RawFiles.count)";Target=""}
+
+
+        # Omitting CobraShare, - There are two possible flags - Newer Flag takes precedence
+        If($($ConfigData  | where{$_ -like 'AnalyticsOutput|Yes'})) { 
+            $ConfigList += [pscustomobject]@{ Name = 'OmitCobraShare' ; Value= $False; Target=''}
+        }
+        ElseIf($($ConfigData  | where{$_ -like 'AnalyticsOutput|No'})) { 
+            $ConfigList += [pscustomobject]@{ Name = 'OmitCobraShare' ; Value= $True; Target=''}
+        }
+        elseif($($ConfigData  | where{$_ -like 'OmitCobraShare|Yes'})) { 
+            $ConfigList += [pscustomobject]@{ Name = 'OmitCobraShare' ; Value= $True; Target=''}
+        }
+        else {
+            $ConfigList += [pscustomobject]@{ Name = 'OmitCobraShare' ; Value= $False; Target=''}
+        }
+        
+        If($($ConfigData  | where{$_ -like 'SendToShape|Yes'})) { 
+            $ConfigList += [pscustomobject]@{ Name = 'SendToShape' ; Value= $True; Target=''}
+
+            # TOT 624 
+            foreach ($Item in $($ConfigData | where{$_ -like 'ShapeExclusion|*'})) {
+                $ConfigList += [pscustomobject]@{ Name = 'ShapeExclusion' ; Value = $Item.Split("|")[1].trim()}
+            }
+        }
+        else {
+            $ConfigList += [pscustomobject]@{ Name = 'SendToShape' ; Value= $False; Target=''}
+        }
+
+        If($($ConfigData  | where{$_ -like 'SuppressRecordCounts|Yes'})) { 
+            $ConfigList += [pscustomobject]@{ Name = 'SuppressRecordCounts' ; Value= $True; Target=''}
+        }
+        else {
+            $ConfigList += [pscustomobject]@{ Name = 'SuppressRecordCounts' ; Value= $False; Target=''}
+        }
+        
+        # Reformatted files to be zipped
+        $ConfigList += [pscustomobject]@{ Name = 'ReformattedFile' ; Value ="$($JobNumberDate)_$TypeFlag.rfm.$OutExt"    ;Target=""}
+        $ConfigList += [pscustomobject]@{ Name = 'ReformattedZip'  ; Value ="$($JobNumberDate)_PAFReformatted.zip"       ;Target=""}
+        
+        # Source file names are not consistent so if not matching then use wild cards, this can lead to duplicates which need removing
+        $SourceSpecs     = $($ConfigData | where{$_ -like 'InputFileName|*'}).tostring().Split("|")[1],'*.csv','*.txt','*.int','*.dat'
+        $JobSourceFolder = $(get-item $ConfigFile).Directory.tostring().tolower().Replace("configfiles","SourceFiles")
+        
+        $SourceFiles =@()
+        foreach($SourceSpec in $SourceSpecs) {
+            if(test-path $(join-path $JobSourceFolder $SourceSpec) ) {
+                $SourceFiles +=  get-childitem $(join-path $JobSourceFolder $SourceSpec) -file
+            }
+        }
+        $SourceFiles = $SourceFiles | Sort-Object | Get-Unique
+        
+        foreach($SourceFile in $SourceFiles) {
+            $ConfigList += [pscustomobject]@{ Name = 'SourceFile' ; Value=$SourceFile.Name; Target=''}
+        }       
+        
+        $ConfigList += [pscustomobject]@{ Name = 'SourceZip'       ; Value = "$($JobNumberDate)_Original.zip" ;Target=""}   
+        $ConfigList += [pscustomobject]@{ Name = 'JobOutputFolder' ; Value = $OutputFolder; Target=''}
+            
+        # Files to copy to CobraShare
+        $ConfigList += [pscustomobject]@{ Name = 'CobraShareCopy' ; Value = "FormatFiles\*.fmt"        ;Target = "Config"}
+        $ConfigList += [pscustomobject]@{ Name = 'CobraShareCopy' ; Value = "ConfigFiles\*.Config"     ;Target = "Config"}
+        $ConfigList += [pscustomobject]@{ Name = 'CobraShareCopy' ; Value = "ConfigFiles\*.txt"        ;Target = "Config"}
+        $ConfigList += [pscustomobject]@{ Name = 'CobraShareCopy' ; Value = "ConfigFiles\*.Configlog"  ;Target = "Config"}
+        $ConfigList += [pscustomobject]@{ Name = 'CobraShareCopy' ; Value = "ConfigFiles\*.xls*"       ;Target = "Input"}
+        
+        if($Jobtype -ne 'BSB' ) {
+            # TOT 508 - $OutputFolder instead of hard coded value
+            $ConfigList += [pscustomobject]@{ Name = 'CobraShareCopy' ; Value = "$OutputFolder\*.PDF"  ;Target = "Output"}
+        }
+        if($Jobtype -eq 'DNA') {
+            $ConfigList += [pscustomobject]@{ Name = 'CobraShareCopy' ; Value = "ConfigFiles\*.doc*";Target = "Input"}
+        }
+        
+        $ConfigList += [pscustomobject]@{ Name = 'CobraShareFolder' ; Value = $(join-path $ClientName $JobNumberDate) ;Target = ''}
+        
+        # TOT 613 - Flag to override which report is used for TV Repeat jobs - default is BWF, this overrides to use BI report
+        If($($ConfigData  | where{$_ -like 'UseBIReport|Yes'})) { 
+            $ConfigList += [pscustomobject]@{ Name = 'UseBIReport' ; Value= $True; Target=''}
+        }
+    }
+    else {
+        $ConfigList= $false
+    }
+    Return $ConfigList
+}
+
+
+
