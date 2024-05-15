@@ -1,264 +1,284 @@
-Private Sub SetupJob(JobRunStatus As String, JobNumber As String, RunNumber As Integer, FileFolder As String, FileName As String, JobClient As String, RunID As String)
-' OK this button is to set the job up by creating the folder structure and copying the source file
-'CTC 077 Copy(Move) files from client location to job location using DTP
-'TOT 217 Create seperate DTP action xmls instead of Process XML
+Function JobLaunch(RunID As String, JobType As String, JobNumber As String, RunNumber As Integer, FileName As String) As Boolean
 
-On Local Error GoTo cmdSetupJob_Error
 
-Dim strRootFolder As String
-Dim strJobFolder As String
-Dim LaunchFolder As Integer
-Dim SQL As String
+Dim strSQL As String
 Dim rst As Recordset
+Dim rstL As Recordset
+Dim strTarget As String
+Dim strSourceFolder As String
+Dim strSourceFile As String
+Dim strPotentialFiles() As String
+Dim intI As Integer
+Dim intJobsRunning As Integer
+Dim intPriorRuns As Integer
+Dim blnProceed As Boolean
+Dim LaunchFolder As Integer
+Dim MonitorID As Long
 
-Dim nodeStep As Integer
-Dim InterimSubFolder As String
-Dim GUIDString As String
-Dim PGP_Input As String
-Dim PGPTempFolder As String
-Dim DecryptionAdded As Boolean
-Dim DTPProcessing As String
+ReDim Preserve strPotentialFiles(0)
 
-Dim FileCopied As Boolean
-Dim MaxProcessingTime As Integer
-Dim StartTime As Double
-Dim SecondsElapsed As Double
+Set rst = New Recordset
+Set rstL = New Recordset
 
-Dim SaveLocation As String
-Dim DTPToLoad As String
-Dim ActionListNames As String
-Dim FirstActionPath As String
+blnProceed = CanLaunchJob(RunID, JobType, JobNumber, RunNumber)
 
-Dim DeleteSource As Integer
-Dim sqlDeleteSrc As String
-
-FileCopied = False
-
-If LCase(JobRunStatus) = "logged" Then
+If blnProceed Then
+    
+    strTarget = AutoLoadFolder & Trim(JobNumber) & "\"
     
     ' Determine if we need a Launch Folder
     LaunchFolder = Get_LaunchFolder(JobNumber)
     
-    SQL = "SELECT LaunchFolder FROM DataBureauDataLoadAudit.dbo.CT_Jobs where Job_Number='" & JobNumber & "'"
-
-    Set rst = New Recordset
-    rst.Open SQL, db, adOpenForwardOnly, adLockReadOnly
-    If rst.EOF Then
-        LaunchFolder = 0
-    Else
-        LaunchFolder = rst("LaunchFolder")
-    End If
-    rst.Close
-    
-    'EFT 734 - Specific Jobs when source files should always be moved
- 
-    sqlDeleteSrc = "SELECT ISNULL(DeleteSource, 0) as DeleteSource FROM DataBureauDataLoadAudit.dbo.CT_Jobs where Job_Number='" & JobNumber & "'"
-    rst.Open sqlDeleteSrc, db, adOpenForwardOnly, adLockReadOnly
-    DeleteSource = rst("DeleteSource")
-    rst.Close
-
-    'Set the job folder name
-    strJobFolder = RootJobFolder & JobNumber & "_" & RunNumber
-    
-    ' CTC 089 - Different method of determining whether the file is local or DTP copy is required
-    If IsSourceFileLocal(FileFolder) Then
-        'Create the job folder and it's subfolders
-        fso.CreateFolder (strJobFolder)
-        fso.CreateFolder (strJobFolder & "\Original")
-        If LaunchFolder Then
-            fso.CreateFolder (strJobFolder & "\Launch")
-        End If
-        fso.CreateFolder (strJobFolder & "\Output")
-        fso.CreateFolder (strJobFolder & "\Reports")
-        fso.CreateFolder (strJobFolder & "\Sent")
-        fso.CreateFolder (strJobFolder & "\Old")
-        fso.MoveFile FileFolder & FileName, strJobFolder & "\Original\"
-    Else
-        'Needs copying from EFT using Data Transfer Process
-        'Debug.Print Now(); " Time when Setup Button was clicked"
-        
-        'Get the location for saving the DTP XML files
-        SQL = "select ConfigValue from CT_Config where ConfigItem = 'DTPPendingFolder'"
-        rst.Open SQL, db, adOpenForwardOnly, adLockReadOnly
-        SaveLocation = rst("ConfigValue")
-        rst.Close
-        
-        'Get the location for moving the DTP XML action ToLoad folder
-        SQL = "select ConfigValue from CT_Config where ConfigItem = 'DTPToLoadFolder'"
-        rst.Open SQL, db, adOpenForwardOnly, adLockReadOnly
-        DTPToLoad = rst("ConfigValue")
-        rst.Close
-
-        InterimSubFolder = InterimFolder & JobNumber & "_" & RunNumber
-        'Create subfolder in interim location
-        If fso.FolderExists(InterimSubFolder) Then
-           fso.DeleteFolder (InterimSubFolder)
-        End If
-        fso.CreateFolder (InterimSubFolder)
-        
-        'Generate GUID string for DTP XML
-        GUIDString = GUID.CreateGuidString
-        
-        'Iterating DTP action step sequence from 1
-        nodeStep = 1
-        'Check if decryption is required
-        DecryptionAdded = False
-        SQL = "select PGP_Input from ct_jobs where Job_Number = '" & JobNumber & "'"
-        Set rst = New Recordset
-        rst.Open SQL, db, adOpenForwardOnly, adLockReadOnly
-        If Not rst.EOF Then
-          If IsNull(rst("PGP_Input")) Then
-              PGP_Input = "0"
-          ElseIf rst("PGP_Input") = "False" Then
-              PGP_Input = "0"
-          ElseIf rst("PGP_Input") = "" Then
-              PGP_Input = "0"
-          ElseIf rst("PGP_Input") = "0" Then
-              PGP_Input = "0"
-          Else
-              PGP_Input = rst("PGP_Input")
-              DecryptionAdded = True
-          End If
-        End If
-        rst.Close
-                
-        'Debug.Print Now(); " Collected info for DTP request"
-                
-        'Create decryption node in DTP Request file
-        If DecryptionAdded Then
-           'Set temp folder for PGP decryption
-           PGPTempFolder = PGPTemporaryFolder & GUIDString
-           'Currently as the decryption key is same for all the PGP inbound files we need to set decryption key to empty value for Auto decryption folder
-           PGP_Input = ""
-           Call DTPXML.CreateDecryptionNode(GUIDString, ActionListNames, SaveLocation, nodeStep, FileName, FileFolder, PGPTempFolder, PGP_Input, JobNumber, JobClient)
-           
-           'The filename will no longer have .pgp extension, so need to remove that
-           If InStr(LCase(FileName), ".pgp") > 0 Then FileName = Replace(FileName, ".pgp", "")
-            'Or it may have .gpg extension
-           If InStr(LCase(FileName), ".gpg") > 0 Then FileName = Replace(FileName, ".gpg", "")
-           
-           'Copy the file from temporary PGP location to the interim folder
-           Call DTPXML.CreateCopyNode(GUIDString, ActionListNames, SaveLocation, nodeStep, PGPTempFolder, InterimSubFolder, FileName, JobNumber, JobClient)
-           
-           'After the file has been copied, we can delete the temporary PGP location
-           Call DTPXML.CreateDeletionNode(GUIDString, ActionListNames, SaveLocation, nodeStep, PGPTempFolder, JobNumber, JobClient)
-           
+    If LaunchFolder Then
+        strSourceFolder = RootJobFolder & Trim(JobNumber) & "_" & Trim(RunNumber) & "\Launch\*.*"
+            
+        ' can  we identify the file to load
+        intI = 0
+        strPotentialFiles(intI) = Dir(strSourceFolder)
+        If strPotentialFiles(intI) = "" Then
+            MsgBox ("Move file to Launch into Launch folder and try again")
+            Exit Function
         Else
-        'Create DTP request node to copy(move) files from input location to interim location
-        'EFT 734 - Specific Jobs when source files should always be moved
-            If DeleteSource = 1 Then
-                Call DTPXML.CreateMoveNode(GUIDString, ActionListNames, SaveLocation, nodeStep, FileFolder, InterimSubFolder, FileName, JobNumber, JobClient)
-            ElseIf InStr(LCase(FileFolder), "\production\data in\calltrace\") > 0 Or InStr(LCase(FileFolder), "\Neptune\CallTrace\InTouch\") > 0 Then
-                Call DTPXML.CreateMoveNode(GUIDString, ActionListNames, SaveLocation, nodeStep, FileFolder, InterimSubFolder, FileName, JobNumber, JobClient)
-            Else
-                Call DTPXML.CreateCopyNode(GUIDString, ActionListNames, SaveLocation, nodeStep, FileFolder, InterimSubFolder, FileName, JobNumber, JobClient)
-            End If
-        End If
-
-        'Create DTP request to create a trigger file when file copy has been complete using "BespokeCommand" with "out-file", inside the interimSubFolder
-        Call DTPXML.CreateTriggerNode(GUIDString, ActionListNames, SaveLocation, nodeStep, InterimSubFolder, JobNumber, RunNumber)
-        
-        'Move the first action into the ToLoad folder
-        FirstActionPath = Split(ActionListNames, ";")(0)
-        fso.MoveFile FirstActionPath, DTPToLoad
-
-        'Debug.Print Now(); " Created DTP action xmls"
-        
-        'Start the timer to check how long DTP process has been running
-        StartTime = Timer
-        MaxProcessingTime = 120
-        
-        'Loop until completed transfer trigger file is found - meaning the end of the copy
-        While Not fso.FileExists(InterimSubFolder & "\" & JobNumber & "_" & RunNumber & ".trg")
-            'Check the elapsed time
-            SecondsElapsed = Round(Timer - StartTime, 2)
-            
-            'Check if any actions triggers were moved to the failed folder
-            'Beggining and ending of action trigger names can differ, so need a wildcard to check if it exists
-            If (Dir(DTPFailedFolder + "*" & GUIDString & "*") <> vbNullString) Then
-                MsgBox "Request to copy the file failed" & vbCrLf & "Please contact Technical Operator."
-                Exit Sub
-            End If
-            
-           'It shouldn't take longer than 2 minutes, if it does it probably means DTP process failed to copy the file
-            If SecondsElapsed > MaxProcessingTime Then
-                MsgBox ("Request to copy the file from client to Job folder exceeded it's time limit - " & (MaxProcessingTime / 60) & " minutes")
-                
-                'Allow users to extend the time of the copy if time limit is exceeded
-                If (MsgBox("Extend time limit by another minute?", vbYesNo) = vbYes) Then
-                    MaxProcessingTime = MaxProcessingTime + 60
-                Else
-                    Exit Sub
+            ' loop through all files from Launch folder
+            Do
+                intI = intI + 1
+                If intI > UBound(strPotentialFiles) Then
+                    ReDim Preserve strPotentialFiles(intI)
                 End If
-            End If
+                strPotentialFiles(intI) = Dir
+            Loop While Len(strPotentialFiles(intI))
             
-        Wend
-        ' Debug.Print Now(); " Detected trigger created by DTP"
-        
-        'Create required job folders
-        fso.CreateFolder (strJobFolder)
-        fso.CreateFolder (strJobFolder & "\Original")
-        If LaunchFolder Then
-            fso.CreateFolder (strJobFolder & "\Launch")
+            If intI > 1 Then
+                MsgBox ("More than one file found in Launch folder, remove other files and try again")
+                Exit Function
+            Else
+                strSourceFolder = RootJobFolder & Trim(JobNumber) & "_" & Trim(RunNumber) & "\Launch\"
+                strSourceFile = strPotentialFiles(0)
+            End If
         End If
-        fso.CreateFolder (strJobFolder & "\Output")
-        fso.CreateFolder (strJobFolder & "\Reports")
-        fso.CreateFolder (strJobFolder & "\Sent")
-        fso.CreateFolder (strJobFolder & "\Old")
-        
-        'Third timer
-        ' Debug.Print Now(); " Created job folders"
-        
-        'Move file from interim location to Job folder using CTC
-        fso.MoveFile InterimSubFolder & "\" & FileName, strJobFolder & "\Original\"
-        
-        ' Debug.Print Now(); " Moved the file from interim to job folder"
-    
-        'Delete the interim subfolder along the completed transfer trigger
-        fso.DeleteFolder (InterimSubFolder)
-        ' Debug.Print Now(); " Deleted the interim folder"
+    Else
+        strSourceFolder = RootJobFolder & Trim(JobNumber) & "_" & Trim(RunNumber) & "\Original\"
+        strSourceFile = FileName
     End If
-    
-    FileCopied = True
-    
-    ' check if we have a file with a leading space in the name as this can cause errors. If RTrim(lblJDFileName.Caption) <> Trim(lblJDFileName.Caption) Then
-    If RTrim(FileName) <> Trim(FileName) Then
-        ' no leading spaces
-        fso.MoveFile strJobFolder & "\Original\" & RTrim(FileName), strJobFolder & "\Original\" & Trim(FileName)
-        FileName = Trim(FileName)
-    End If
-    ' Debug.Print Now(); " Checked and/or removed leading spaces"
         
-    JobRunStatus = "Pre-Processing"
+    Set rst = New Recordset
     
-    Call UpdateRunStatus(RunID, JobRunStatus, 0, "")
-    ' Debug.Print Now(); " Updated run status"
-        
-    Call SetActions(JobRunStatus)
-    ' Debug.Print Now(); " Console actions set"
-    MsgBox ("Folders Created and Source File Copied")
+    strSQL = "Select  j.JobNo as jobno, j.CustomerID, j.versioninc, j.stateid, s.StepStateID From neptune.dbo.Jis j "
+    strSQL = strSQL & "inner join (select max(jisid) jisid from neptune.dbo.Jis where jobno='" & Trim(JobNumber) & "') M "
+    strSQL = strSQL & "on j.jisid = M.jisid inner join neptune.dbo.JisStep s on j.jisid=s.jisid where s.stepid = 204"
+    
+    rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+    
+    If rst.EOF Then
+        MsgBox ("Run Not Launched, This job number isn't setup for Auto Launch")
+        rst.Close
+    ElseIf rst("StateID") <> 90 And rst("VersionInc") = 0 Then
+        MsgBox ("Run Not Launched, Initial run of this job is not completed and verified")
+        rst.Close
+    ElseIf rst("StepStateID") <> 20 Then
+        MsgBox ("Run Not Launched, Data still being imported for previous run")
+        rst.Close
+    Else
+        rst.Close
+    
+        ' OK we need to wait check this launch hasn't been attempted but failed previously
+        strSQL = " select count(*) GotEntry from neptune.dbo.MonitoredFiles where islocked =1 and username is null and Filename = '" & strSourceFile & "' and "
+        strSQL = strSQL & " Folder like '%" & Trim(JobNumber) & "%'"
 
+        rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+        If rst("GotEntry") > 0 Then
+            MsgBox ("Run Not Launched, There is already a partial launch for this run, contact Support")
+            rst.Close
+        Else
+            rst.Close
+            ' now launch the file
+            If Not fso.FolderExists(strTarget) Then
+                fso.CreateFolder (strTarget)
+            End If
+            ' CTC 102 Delete target if already exists
+            If fso.FileExists(strTarget & strSourceFile) Then
+                fso.DeleteFile strTarget & strSourceFile
+                Call Sleep(5)
+            End If
+                
+            fso.CopyFile strSourceFolder & strSourceFile, strTarget, False
+               
+            ' CTC 114 - New Launch Confirmation Code - Main Logic migrated to SQL
+            Call CheckLaunch_AutoLaunch(strTarget, strSourceFile, strUserName, JobNumber, RunNumber, RunID)
+            
+        
+        End If
+    End If
 End If
 
-Exit Sub
+JobLaunch = blnProceed
 
+End Function
 
-cmdSetupJob_Error:
-    If FileCopied Then
-        MsgBox "Error occured before copying the file, make sure the file exists and try again."
-        MsgBox "Error: " & Err.Description
-        Exit Sub
-    Else
-        MsgBox "Error occured after copying the file to job folder. Contact Technical Operator."
-        MsgBox "Error: " & Err.Description
-        Exit Sub
-    End If
-
-
-End Sub
 
 --------------
 
+Function CanLaunchJob(RunID As String, JobType As String, JobNumber As String, RunNumber As Integer) As Boolean
+
+Dim strSQL As String
+Dim rst As Recordset
+Dim blnProceed As Boolean
+Dim intJobsRunning As Integer
+Dim intPriorRuns As Integer
+
+Set rst = New Recordset
+
+
+' Check if Launch is Enabled or not
+strSQL = "exec dbo.up_CT_IsLaunchEnabled"
+rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+
+If rst.EOF Then
+    MsgBox ("Launch Currently Disabled")
+    blnProceed = False
+Else
+    If LCase(rst("ConfigValue")) = "true" Then
+        blnProceed = True
+    Else
+        MsgBox ("Launch Currently Disabled")
+        blnProceed = False
+    End If
+End If
+rst.Close
+
+' CTC 098 Additional Check for DPP Jobs
+If blnProceed And LCase(JobType) = "dpp" Then
+    strSQL = "Exec dbo.up_CT_DPP_LaunchCheck"
+    rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+    
+    If rst.EOF Then
+        MsgBox ("Unable to verify Cobra Environment Status for DPP jobs")
+        blnProceed = False
+    Else
+        If rst("Enabled") Then
+            blnProceed = True
+        Else
+            MsgBox ("DPP Launch on " & rst("Environment") & " Currently Disabled")
+            blnProceed = False
+        End If
+    End If
+    rst.Close
+End If
+
+If blnProceed Then
+    ' check if any running jobs have completed
+    Call CheckNeptuneStatus
+    
+    ' check how many jobs are actually currently running
+    strSQL = "select Count(*) as JobsRunning from dbo.CT_JobRun where RunStatus = 'Running'"
+    rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+    intJobsRunning = rst("JobsRunning")
+    rst.Close
+    
+    If intJobsRunning < 10 Then ' #CTC032
+        blnProceed = True
+    ElseIf MsgBox("There are already " & Trim(str(intJobsRunning)) & " running, Do you wish to Launch This job?", vbYesNo) = vbYes Then
+        blnProceed = True
+    Else
+        blnProceed = False
+    End If
+End If
+
+If blnProceed Then
+    
+    ' #CTC013
+    strSQL = "Exec dbo.up_CT_PreviousRunCheck '" & JobNumber & "', " & RunNumber
+    rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+    intPriorRuns = rst("PriorRuns")
+    rst.Close
+    
+    
+    If intPriorRuns = 0 Then
+        blnProceed = True
+    'CTC120 - updated to prevent launching multiple jobs while previous run hasn't reached one of statuses like Neptune Complete, In QC, Verified
+    Else: MsgBox (Trim(str(intPriorRuns)) & " previous run(s) for this job has not finished processing, for now you cannot launch this job")
+        blnProceed = False
+    End If
+End If
+
+If blnProceed Then
+    ' first run of a job is processed through neptune, so just update the status
+    If Val(RunNumber) = 0 Then
+        Call UpdateRunStatus(RunID, "Running", 0, "")
+        Call SetActions("Running")
+        blnProceed = False
+    End If
+End If
+
+CanLaunchJob = blnProceed
+
+End Function
+
+
+Sub CheckNeptuneStatus()
+    ' check the Neptune status for jobs which are currently running
+
+'    On Error GoTo CheckNeptuneStatus_Error
+
+    Dim strSQL As String
+    Dim intP As Integer
+    Dim strJobNumber As String
+    Dim strRunNumber As String
+    Dim intI As Integer
+    Dim intCount As Integer
+    Dim rst As Recordset
+    Dim rst2 As Recordset
+    Dim NeptuneVolume As Integer
+    Dim RunID As Integer
+    Dim NewState As String
+    Dim OldState As String
+            
+    Set rst = New Recordset
+        
+    strSQL = "select * from dbo.vw_CT_JobRunStatus"
+    rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+    
+    While Not rst.EOF
+        
+        NewState = strAssign(rst("NewState"))
+        OldState = strAssign(rst("OldState"))
+        
+        ' update the new job status if is has changed
+        If NewState <> OldState And NewState <> "" Then
+            
+            ' if job has completed through Neptune and volume > 100,000 then deselect the check box for checking
+            ' file volumes
+            If NewState = "Neptune Complete" Then
+                
+                ' first get volume from Neptune to record against the job
+                strSQL = "update R set R.volume = replace(V.Volume,'*','') from dbo.ct_jobrun R inner join dbo.vw_CallTraceCurrentJobsV4 V on R.CT_RunID = V.RunID where V.Volume <> '?' and R.volume is null"
+                db.Execute strSQL
+                                
+            End If
+        
+            Call UpdateRunStatus(rst("RunID"), NewState, 0, "")
+        End If
+        
+        rst.MoveNext
+    Wend
+    rst.Close
+    
+    ' check jobs where TeleAppend is null
+    strSQL = "select JobNo, RunNo from dbo.vw_CallTraceCurrentJobsV4 where isnull(teleappend,'?') = '?'"
+    rst.Open strSQL, db, adOpenForwardOnly, adLockReadOnly
+    
+    While Not rst.EOF
+        ' update the teleappend flag
+        strJobNumber = strAssign(rst("JobNo"))
+        strRunNumber = strAssign(rst("RunNo"))
+        
+        strSQL = "exec dbo.up_CT_FlagTeleAppend '" & strJobNumber & "','" & strRunNumber & "'"
+        db.Execute (strSQL)
+        
+        rst.MoveNext
+    Wend
+    
+End Sub
 
 Function Get_LaunchFolder(JobNumber As String) As Integer
 
@@ -281,43 +301,34 @@ Function Get_LaunchFolder(JobNumber As String) As Integer
 
 End Function
 
----------
-Function Trim(varIn As Variant) As String
+Sub CheckLaunch_AutoLaunch(strTarget As String, strSourceFile As String, strUserName As String, JobNumber As String, RunNumber As Integer, RunID As String)
+' CTC 114 - New Launch Confirmation Code - Main Logic migrated to SQL
 
-    If IsNull(varIn) Then
-        Trim = ""
-    Else
-        Trim = LTrim(RTrim(varIn))
-    End If
+Dim rstCL As Recordset
+Set rstCL = New Recordset
+Dim SQL As String
+Dim MonitorID As Long
 
-End Function
+' first get the LaunchID from the Neptune.dbo.MonitoredFiles table - 0 means it Timed out
+SQL = "exec [dbo].[up_CT_GetLaunchID] '" & JobNumber & "', '" & strSourceFile & "'"
+Set rstCL = db.Execute(SQL)
+MonitorID = rstCL("MonitorID")
+rstCL.Close
 
-
-------------------------------------
-
-Sub UpdateRunStatus(strRunID As String, strStatus As String, intError As Integer, strTTP As String)
-
-Dim strSQL As String
-
-' update the run status for the given job and refresh screen
-strSQL = "Update dbo.CT_JobRun Set RunStatus = '" & strStatus & "' where CT_RunID = " & strRunID
-db.Execute (strSQL)
-
-' add an entry to the run status audit log
-If LCase(strStatus) = "failed" Then
-    strSQL = "insert into dbo.CT_RunStatusLog (CT_RunID, CT_Status, UserName, UpdateDate, ErrorType, TTP) "
-    strSQL = strSQL & "select " & strRunID & ", '" & strStatus & "', '" & strUserName & "', getdate(), ErrorType, '" & strTTP & "' "
-    strSQL = strSQL & "from dbo.CT_ErrorType where CT_ErrorID = " & Trim(intError)
+If MonitorID > 0 Then
+    
+    ' if Successful we need to add the Username to the entry and set the IsLocked Flag
+    SQL = "exec [dbo].[up_CT_ConfirmLaunch] '" & JobNumber & "','" & RunNumber & "'," & CStr(MonitorID) & ",'" & strUserName & "'"
+    db.Execute (SQL)
+    
+    MsgBox ("Launch Succeeded")
+    Call UpdateRunStatus(RunID, "Running", 0, "")
+    Call SetActions("Running")
+    
+    Call Close_DetailsPage_AutoLaunch(RunID)
 Else
-    strSQL = "insert into dbo.CT_RunStatusLog (CT_RunID, CT_Status, UserName, UpdateDate) values (" & strRunID & ", '" & strStatus & "', '" & strUserName & "', getdate()) "
-End If
-
-db.Execute (strSQL)
-
-' if completed update the job run with completion date
-If LCase(strStatus) = "complete" Then
-    strSQL = "Update dbo.CT_JobRun Set CompletedDate = getdate() where ct_runID = " & strRunID
-    db.Execute (strSQL)
+    fso.DeleteFile strTarget & strSourceFile
+    MsgBox ("Launch Failed, Check File Watcher is Active")
 End If
 
 End Sub
