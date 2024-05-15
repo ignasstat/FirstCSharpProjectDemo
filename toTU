@@ -1,3 +1,203 @@
+function ExecuteSQLCommand ($sql) {
+    $command = $connection.CreateCommand()
+    $command.CommandText = $sql
+    $connection.Open()
+    $command.ExecuteNonQuery()
+    $connection.Close()
+}
+
+# Function to query SQL and return results
+function QuerySQL ($sql) {
+    $command = $connection.CreateCommand()
+    $command.CommandText = $sql
+    $connection.Open()
+    $result = $command.ExecuteReader()
+    $table = New-Object System.Data.DataTable
+    $table.Load($result)
+    $connection.Close()
+    return $table
+}
+function ClearFileLock($fileID, $fileSource) {
+    $sql = "EXECUTE [dbo].[up_CT_ClearFileLock] $fileID, '$fileSource'"
+    Execute-SQLCommand $sql
+}
+
+Function ClearFileLock($fileID, $fileSource) {
+    $sql = "EXECUTE [dbo].[up_CT_ClearFileLock] $fileID, '$fileSource'"
+    Execute-SQLCommand $sql
+}
+
+
+
+function CheckFileExists($lngFileID, $jobNumber) {
+    $sql = "SELECT Folder, Filename FROM dbo.vw_ExistingFiles WHERE fileid = $lngFileID"
+    $result = Query-SQL $sql
+    if ($result.Rows.Count -eq 0) {
+        Write-Host "file no longer in view (someone else may have processed it)"
+        return "not in view"
+    } else {
+        $strFile = $result.Rows[0].Folder + $result.Rows[0].Filename
+        $headerInFirstRow = GetHeaderInFirstRow $jobNumber
+        
+        # Determine if the file is local or needs EFT handling
+        if ($strFile -match '\\\\cig.local\\Data\\Marketing Solutions Departments\\Production\\') {
+            return CheckFileExists_Local $strFile $headerInFirstRow
+        } else {
+            return CheckFileExists_EFT $lngFileID $jobNumber $headerInFirstRow $strFile
+        }
+    }
+}
+
+
+
+function CheckFileExists_Local($myFile, $headerInFirstRow) {
+    if (-Not (Test-Path $myFile)) {
+        return "not found"
+    } else {
+        $fileInfo = Get-Item $myFile
+        if ($fileInfo.Length -gt 0) {
+            if ($headerInFirstRow) {
+                if (ContainsMultipleLines $myFile) {
+                    return "OK"
+                } else {
+                    return "Is empty"
+                }
+            } else {
+                return "OK"
+            }
+        } else {
+            return "Is empty"
+        }
+    }
+}
+function GetHeaderInFirstRow($jobNumber) {
+    $sql = "SELECT HeadersInFirstRow FROM neptunefileimporter.fileimporter.Jobs WHERE JobId IN (SELECT Max(JobId) FROM neptunefileimporter.fileimporter.Jobs WHERE DestinationTable = '$jobNumber')"
+    $result = Query-SQL $sql
+    if ($result.Rows.Count -gt 0) {
+        return $result.Rows[0].HeadersInFirstRow
+    } else {
+        Write-Host "Error retrieving HeadersInFirstRow value from neptunefileimporter.fileimporter.Jobs"
+        return $false
+    }
+}
+
+
+
+# Define ContainsMultipleLines (using PowerShell to read the file)
+function ContainsMultipleLines($fileName) {
+    $lineCount = 0
+    try {
+        $reader = [System.IO.File]::OpenText($fileName)
+        while (-not $reader.EndOfStream -and $lineCount -lt 2) {
+            $reader.ReadLine()
+            $lineCount++
+        }
+        $reader.Close()
+    } catch {
+        Write-Host "Error reading file $fileName"
+    }
+    return $lineCount -gt 1
+}
+
+# Define DeleteFile (using PowerShell's Remove-Item)
+function DeleteFile($filePath) {
+    if (Test-Path $filePath) {
+        Remove-Item $filePath -Force
+        if (-Not (Test-Path $filePath)) {
+            Write-Host "File $filePath deleted successfully."
+        } else {
+            Write-Host "Trigger file '$filePath' could not be deleted after multiple attempts."
+        }
+    }
+}
+
+
+function CheckFileExists_EFT([int]$lngFileID, [string]$jobNumber, [bool]$headerInFirstRow, [string]$strFile) {
+    $fileExistsTriggerFolder = "PathToYourTriggerFolder"  # Set this to your actual trigger folder path
+    $fileExistsTriggerToProcessFolder = "$fileExistsTriggerFolder\ToProcess\"
+    $fileExistsTriggerFullPath = "${fileExistsTriggerToProcessFolder}${lngFileID}.trg"
+    
+    $foundFolder = "$fileExistsTriggerFolder\Found\"
+    $foundNotEmpty = "${foundFolder}NotEmpty\"
+    $foundEmpty = "${foundFolder}Empty\"
+    $notFoundFolder = "$fileExistsTriggerFolder\NotFound\"
+    
+    $fileFoundNotEmptyPath = "${foundNotEmpty}${lngFileID}.trg"
+    $fileFoundEmptyPath = "${foundEmpty}${lngFileID}.trg"
+    $fileNotFoundPath = "${notFoundFolder}${lngFileID}.trg"
+    
+    # Delete existing trigger files
+    DeleteFile $fileFoundNotEmptyPath
+    DeleteFile $fileFoundEmptyPath
+    DeleteFile $fileNotFoundPath
+    DeleteFile $fileExistsTriggerFullPath
+
+    # Create a new trigger file
+    [System.IO.File]::WriteAllLines($fileExistsTriggerFullPath, @($strFile, $jobNumber, $headerInFirstRow))
+    
+    # Check for trigger file appearance in folders
+    $attemptCount = 0
+    $maxAttempts = 3
+    
+    do {
+        Start-Sleep -Seconds 3
+        if (Test-Path $fileFoundNotEmptyPath -or Test-Path $fileFoundEmptyPath -or Test-Path $fileNotFoundPath) {
+            break
+        }
+        $attemptCount++
+    } while ($attemptCount -lt $maxAttempts)
+
+    if ($attemptCount -eq $maxAttempts) {
+        Write-Host "Trigger file not found after multiple attempts."
+        return "trigger notfound"
+    }
+
+    if (Test-Path $fileNotFoundPath) {
+        DeleteFile $fileNotFoundPath
+        return "not found"
+    } elseif (Test-Path $fileFoundNotEmptyPath) {
+        DeleteFile $fileFoundNotEmptyPath
+        return "OK"
+    } elseif (Test-Path $fileFoundEmptyPath) {
+        DeleteFile $fileFoundEmptyPath
+        return "Is empty"
+    }
+}
+
+function Write-Log {
+    Param(  [String] $AuditLogFile,
+            [String] $AuditMessage,
+            $ErrorFound )
+
+    $MyDate = get-date
+
+    [string]$FullMessage = $MyDate.ToLongDateString() + "|" + $MyDate.ToLongTimeString() + "|" + $AuditMessage
+
+    if($ErrorFound) {
+        write-Host  $AuditMessage -ForegroundColor Red
+    }
+    else {
+        write-Host  $AuditMessage -ForegroundColor White
+    }
+
+    # can get hung up due to network latency - so include retry
+    $MaxTries = 10
+    while( !$Completed) {
+        try {
+            Add-Content $AuditLogFile ($FullMessage) -erroraction Stop
+            $Completed = $True
+        }
+        catch {
+            Start-Sleep -Seconds 2
+            $MaxTries -= 1
+        }
+        if( $MaxTries -lt 0 ){ 
+            write-host "Failed to write to log: $FullMessage" 
+            $Completed = $True
+        }
+    }
+}
+
 function Setup-Job {
     param (
         [string]$JobRunStatus,
@@ -242,6 +442,3 @@ WHERE CT_ErrorID = $(Trim $intError)
         $command.CommandText = $completionQuery
         $command.ExecuteNonQuery()
     }
-
-    $connection.Close()
-}
