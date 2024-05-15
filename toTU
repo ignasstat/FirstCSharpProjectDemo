@@ -1,447 +1,209 @@
-# Define ExecuteSQLCommand function
-function Execute-SQLCommand {
+# JobLaunch function
+function Job-Launch {
     param (
-        [string]$sql,
-        [string]$connectionString
-    )
-    $connection = New-Object System.Data.SqlClient.SqlConnection
-    $connection.ConnectionString = $connectionString
-    $command = $connection.CreateCommand()
-    $command.CommandText = $sql
-    $connection.Open()
-    $command.ExecuteNonQuery()
-    $connection.Close()
-}
-
-# Define QuerySQL function
-function Query-SQL {
-    param (
-        [string]$sql,
-        [string]$connectionString
-    )
-    $connection = New-Object System.Data.SqlClient.SqlConnection
-    $connection.ConnectionString = $connectionString
-    $command = $connection.CreateCommand()
-    $command.CommandText = $sql
-    $connection.Open()
-    $result = $command.ExecuteReader()
-    $table = New-Object System.Data.DataTable
-    $table.Load($result)
-    $connection.Close()
-    return $table
-}
-
-# Define ClearFileLock function
-function Clear-FileLock {
-    param (
-        [int]$fileID,
-        [string]$fileSource
-    )
-    $connectionString = "Server=your_server;Database=DataBureauDataLoadAudit;Integrated Security=True;"
-    $sql = "EXECUTE [dbo].[up_CT_ClearFileLock] $fileID, '$fileSource'"
-    Execute-SQLCommand -sql $sql -connectionString $connectionString
-}
-
-# Define CheckFileExists function
-function Check-FileExists {
-    param (
-        [int]$lngFileID,
-        [string]$jobNumber
-    )
-    $connectionString = "Server=your_server;Database=DataBureauDataLoadAudit;Integrated Security=True;"
-    $sql = "SELECT Folder, Filename FROM dbo.vw_ExistingFiles WHERE fileid = $lngFileID"
-    $result = Query-SQL -sql $sql -connectionString $connectionString
-
-    if ($result.Rows.Count -eq 0) {
-        Write-Host "file no longer in view (someone else may have processed it)"
-        return "not in view"
-    } else {
-        $strFile = $result.Rows[0].Folder + $result.Rows[0].Filename
-        $headerInFirstRow = Get-HeaderInFirstRow -jobNumber $jobNumber
-
-        if ($strFile -match '\\\\cig.local\\Data\\Marketing Solutions Departments\\Production\\') {
-            return Check-FileExists_Local -myFile $strFile -headerInFirstRow $headerInFirstRow
-        } else {
-            return Check-FileExists_EFT -lngFileID $lngFileID -jobNumber $jobNumber -headerInFirstRow $headerInFirstRow -strFile $strFile
-        }
-    }
-}
-
-# Define CheckFileExists_Local function
-function Check-FileExists_Local {
-    param (
-        [string]$myFile,
-        [bool]$headerInFirstRow
-    )
-    if (-Not (Test-Path $myFile)) {
-        return "not found"
-    } else {
-        $fileInfo = Get-Item $myFile
-        if ($fileInfo.Length -gt 0) {
-            if ($headerInFirstRow) {
-                if (Contains-MultipleLines -fileName $myFile) {
-                    return "OK"
-                } else {
-                    return "Is empty"
-                }
-            } else {
-                return "OK"
-            }
-        } else {
-            return "Is empty"
-        }
-    }
-}
-
-# Define GetHeaderInFirstRow function
-function Get-HeaderInFirstRow {
-    param (
-        [string]$jobNumber
-    )
-    $connectionString = "Server=your_server;Database=neptunefileimporter;Integrated Security=True;"
-    $sql = "SELECT HeadersInFirstRow FROM fileimporter.Jobs WHERE JobId IN (SELECT Max(JobId) FROM fileimporter.Jobs WHERE DestinationTable = '$jobNumber')"
-    $result = Query-SQL -sql $sql -connectionString $connectionString
-
-    if ($result.Rows.Count -gt 0) {
-        return $result.Rows[0].HeadersInFirstRow
-    } else {
-        Write-Host "Error retrieving HeadersInFirstRow value from fileimporter.Jobs"
-        return $false
-    }
-}
-
-# Define ContainsMultipleLines function
-function Contains-MultipleLines {
-    param (
-        [string]$fileName
-    )
-    $lineCount = 0
-    try {
-        $reader = [System.IO.File]::OpenText($fileName)
-        while (-not $reader.EndOfStream -and $lineCount -lt 2) {
-            $reader.ReadLine()
-            $lineCount++
-        }
-        $reader.Close()
-    } catch {
-        Write-Host "Error reading file $fileName"
-    }
-    return $lineCount -gt 1
-}
-
-# Define DeleteFile function
-function Delete-File {
-    param (
-        [string]$filePath
-    )
-    if (Test-Path $filePath) {
-        Remove-Item $filePath -Force
-        if (-Not (Test-Path $filePath)) {
-            Write-Host "File $filePath deleted successfully."
-        } else {
-            Write-Host "Trigger file '$filePath' could not be deleted after multiple attempts."
-        }
-    }
-}
-
-# Define CheckFileExists_EFT function
-function Check-FileExists_EFT {
-    param (
-        [int]$lngFileID,
-        [string]$jobNumber,
-        [bool]$headerInFirstRow,
-        [string]$strFile
-    )
-    $fileExistsTriggerFolder = "PathToYourTriggerFolder"
-    $fileExistsTriggerToProcessFolder = "$fileExistsTriggerFolder\ToProcess\"
-    $fileExistsTriggerFullPath = "${fileExistsTriggerToProcessFolder}${lngFileID}.trg"
-
-    $foundFolder = "$fileExistsTriggerFolder\Found\"
-    $foundNotEmpty = "${foundFolder}NotEmpty\"
-    $foundEmpty = "${foundFolder}Empty\"
-    $notFoundFolder = "$fileExistsTriggerFolder\NotFound\"
-
-    $fileFoundNotEmptyPath = "${foundNotEmpty}${lngFileID}.trg"
-    $fileFoundEmptyPath = "${foundEmpty}${lngFileID}.trg"
-    $fileNotFoundPath = "${notFoundFolder}${lngFileID}.trg"
-
-    # Delete existing trigger files
-    Delete-File -filePath $fileFoundNotEmptyPath
-    Delete-File -filePath $fileFoundEmptyPath
-    Delete-File -filePath $fileNotFoundPath
-    Delete-File -filePath $fileExistsTriggerFullPath
-
-    # Create a new trigger file
-    [System.IO.File]::WriteAllLines($fileExistsTriggerFullPath, @($strFile, $jobNumber, $headerInFirstRow))
-
-    # Check for trigger file appearance in folders
-    $attemptCount = 0
-    $maxAttempts = 3
-
-    do {
-        Start-Sleep -Seconds 3
-        if (Test-Path $fileFoundNotEmptyPath -or Test-Path $fileFoundEmptyPath -or Test-Path $fileNotFoundPath) {
-            break
-        }
-        $attemptCount++
-    } while ($attemptCount -lt $maxAttempts)
-
-    if ($attemptCount -eq $maxAttempts) {
-        Write-Host "Trigger file not found after multiple attempts."
-        return "trigger notfound"
-    }
-
-    if (Test-Path $fileNotFoundPath) {
-        Delete-File -filePath $fileNotFoundPath
-        return "not found"
-    } elseif (Test-Path $fileFoundNotEmptyPath) {
-        Delete-File -filePath $fileFoundNotEmptyPath
-        return "OK"
-    } elseif (Test-Path $fileFoundEmptyPath) {
-        Delete-File -filePath $fileFoundEmptyPath
-        return "Is empty"
-    }
-}
-
-# Define WriteLog function
-function Write-Log {
-    param (
-        [string]$AuditLogFile,
-        [string]$AuditMessage,
-        [bool]$ErrorFound
-    )
-    $MyDate = Get-Date
-    $FullMessage = "$($MyDate.ToLongDateString())|$($MyDate.ToLongTimeString())|$AuditMessage"
-
-    if ($ErrorFound) {
-        Write-Host $AuditMessage -ForegroundColor Red
-    } else {
-        Write-Host $AuditMessage -ForegroundColor White
-    }
-
-    $MaxTries = 10
-    $Completed = $false
-    while (-not $Completed -and $MaxTries -gt 0) {
-        try {
-            Add-Content -Path $AuditLogFile -Value $FullMessage -ErrorAction Stop
-            $Completed = $true
-        } catch {
-            Start-Sleep -Seconds 2
-            $MaxTries--
-        }
-    }
-    if (-not $Completed) {
-        Write-Host "Failed to write to log: $FullMessage"
-    }
-}
-
-# Define SetupJob function
-function Setup-Job {
-    param (
-        [string]$JobRunStatus,
+        [string]$RunID,
+        [string]$JobType,
         [string]$JobNumber,
         [int]$RunNumber,
-        [string]$FileFolder,
-        [string]$FileName,
-        [string]$JobClient,
-        [string]$RunID
+        [string]$FileName
     )
-    trap {
-        if ($FileCopied) {
-            Write-Host "Error occurred after copying the file to job folder. Contact Technical Operator."
-        } else {
-            Write-Host "Error occurred before copying the file. Make sure the file exists and try again."
-        }
-        Write-Host "Error: $($_.Exception.Message)"
-        continue
-    }
+    
+    $strPotentialFiles = @()
+    $blnProceed = Can-LaunchJob -RunID $RunID -JobType $JobType -JobNumber $JobNumber -RunNumber $RunNumber
 
-    $connectionString = "Server=your_server;Database=DataBureauDataLoadAudit;Integrated Security=True;"
-    $strJobFolder = "$RootJobFolder$JobNumber`_$RunNumber"
-    $FileCopied = $false
-
-    if ($JobRunStatus.ToLower() -eq "logged") {
+    if ($blnProceed) {
+        $strTarget = "$AutoLoadFolder$($JobNumber.Trim())\"
         $LaunchFolder = Get-LaunchFolder -JobNumber $JobNumber
 
-        $sql = "SELECT ISNULL(DeleteSource, 0) as DeleteSource FROM dbo.CT_Jobs WHERE Job_Number='$JobNumber'"
-        $DeleteSource = (Query-SQL -sql $sql -connectionString $connectionString).Rows[0].DeleteSource
+        if ($LaunchFolder) {
+            $strSourceFolder = "$RootJobFolder$($JobNumber.Trim())_$($RunNumber.Trim())\Launch\*.*"
+            $intI = 0
+            $strPotentialFiles += Get-ChildItem -Path $strSourceFolder -Name
 
-        if (Is-SourceFileLocal -FileFolder $FileFolder) {
-            New-Item -ItemType Directory -Path $strJobFolder -Force
-            New-Item -ItemType Directory -Path "$strJobFolder\Original" -Force
-            if ($LaunchFolder) {
-                New-Item -ItemType Directory -Path "$strJobFolder\Launch" -Force
+            if ($strPotentialFiles.Count -eq 0) {
+                Write-Host "Move file to Launch into Launch folder and try again"
+                return $false
+            } elseif ($strPotentialFiles.Count -gt 1) {
+                Write-Host "More than one file found in Launch folder, remove other files and try again"
+                return $false
+            } else {
+                $strSourceFolder = "$RootJobFolder$($JobNumber.Trim())_$($RunNumber.Trim())\Launch\"
+                $strSourceFile = $strPotentialFiles[0]
             }
-            New-Item -ItemType Directory -Path "$strJobFolder\Output" -Force
-            New-Item -ItemType Directory -Path "$strJobFolder\Reports" -Force
-            New-Item -ItemType Directory -Path "$strJobFolder\Sent" -Force
-            New-Item -ItemType Directory -Path "$strJobFolder\Old" -Force
-            Move-Item -Path "$FileFolder\$FileName" -Destination "$strJobFolder\Original\"
         } else {
-            $sql = "SELECT ConfigValue FROM dbo.CT_Config WHERE ConfigItem='DTPPendingFolder'"
-            $SaveLocation = (Query-SQL -sql $sql -connectionString $connectionString).Rows[0].ConfigValue
-
-            $sql = "SELECT ConfigValue FROM dbo.CT_Config WHERE ConfigItem='DTPToLoadFolder'"
-            $DTPToLoad = (Query-SQL -sql $sql -connectionString $connectionString).Rows[0].ConfigValue
-
-            $InterimSubFolder = "$InterimFolder$JobNumber`_$RunNumber"
-            if (Test-Path $InterimSubFolder) {
-                Remove-Item -Path $InterimSubFolder -Recurse -Force
-            }
-            New-Item -ItemType Directory -Path $InterimSubFolder -Force
-
-            $GUIDString = [guid]::NewGuid().ToString()
-            $nodeStep = 1
-            $DecryptionAdded = $false
-            $sql = "SELECT PGP_Input FROM dbo.CT_Jobs WHERE Job_Number='$JobNumber'"
-            $PGP_Input = (Query-SQL -sql $sql -connectionString $connectionString).Rows[0].PGP_Input
-
-            if ([string]::IsNullOrEmpty($PGP_Input) -or $PGP_Input -eq "0" -or $PGP_Input -eq "False") {
-                $PGP_Input = "0"
-            } else {
-                $DecryptionAdded = $true
-            }
-
-            if ($DecryptionAdded) {
-                $PGPTempFolder = "$PGPTemporaryFolder$GUIDString"
-                $PGP_Input = ""
-                Create-DecryptionNode -GUIDString $GUIDString -ActionListNames ([ref]$ActionListNames) -SaveLocation $SaveLocation -nodeStep ([ref]$nodeStep) -FileName $FileName -FileFolder $FileFolder -PGPTempFolder $PGPTempFolder -PGP_Input $PGP_Input -JobNumber $JobNumber -JobClient $JobClient
-
-                if ($FileName.ToLower().Contains(".pgp")) {
-                    $FileName = $FileName.Replace(".pgp", "")
-                } elseif ($FileName.ToLower().Contains(".gpg")) {
-                    $FileName = $FileName.Replace(".gpg", "")
-                }
-
-                Create-CopyNode -GUIDString $GUIDString -ActionListNames ([ref]$ActionListNames) -SaveLocation $SaveLocation -nodeStep ([ref]$nodeStep) -SourceFolder $PGPTempFolder -DestinationFolder $InterimSubFolder -FileName $FileName -JobNumber $JobNumber -JobClient $JobClient
-
-                Create-DeletionNode -GUIDString $GUIDString -ActionListNames ([ref]$ActionListNames) -SaveLocation $SaveLocation -nodeStep ([ref]$nodeStep) -FolderPath $PGPTempFolder -JobNumber $JobNumber -JobClient $JobClient
-            } else {
-                if ($DeleteSource -eq 1 -or $FileFolder.ToLower().Contains("\production\data in\calltrace\") -or $FileFolder.ToLower().Contains("\neptune\calltrace\intouch\")) {
-                    Create-MoveNode -GUIDString $GUIDString -ActionListNames ([ref]$ActionListNames) -SaveLocation $SaveLocation -nodeStep ([ref]$nodeStep) -SourceFolder $FileFolder -DestinationFolder $InterimSubFolder -FileName $FileName -JobNumber $JobNumber -JobClient $JobClient
-                } else {
-                    Create-CopyNode -GUIDString $GUIDString -ActionListNames ([ref]$ActionListNames) -SaveLocation $SaveLocation -nodeStep ([ref]$nodeStep) -SourceFolder $FileFolder -DestinationFolder $InterimSubFolder -FileName $FileName -JobNumber $JobNumber -JobClient $JobClient
-                }
-            }
-
-            Create-TriggerNode -GUIDString $GUIDString -ActionListNames ([ref]$ActionListNames) -SaveLocation $SaveLocation -nodeStep ([ref]$nodeStep) -InterimSubFolder $InterimSubFolder -JobNumber $JobNumber -RunNumber $RunNumber
-
-            $FirstActionPath = ($ActionListNames -split ";")[0]
-            Move-Item -Path $FirstActionPath -Destination $DTPToLoad
-
-            $StartTime = [System.Diagnostics.Stopwatch]::StartNew()
-            $MaxProcessingTime = 120
-
-            while (-not (Test-Path "$InterimSubFolder\$JobNumber`_$RunNumber.trg")) {
-                $SecondsElapsed = $StartTime.Elapsed.TotalSeconds
-
-                if (Test-Path "$DTPFailedFolder*$GUIDString*") {
-                    Write-Host "Request to copy the file failed. Please contact Technical Operator."
-                    return
-                }
-
-                if ($SecondsElapsed -gt $MaxProcessingTime) {
-                    Write-Host "Request to copy the file from client to Job folder exceeded its time limit - $($MaxProcessingTime / 60) minutes"
-
-                    if ((Read-Host "Extend time limit by another minute? (Y/N)") -eq "Y") {
-                        $MaxProcessingTime += 60
-                    } else {
-                        return
-                    }
-                }
-            }
-
-            $StartTime.Stop()
-
-            New-Item -ItemType Directory -Path $strJobFolder -Force
-            New-Item -ItemType Directory -Path "$strJobFolder\Original" -Force
-            if ($LaunchFolder) {
-                New-Item -ItemType Directory -Path "$strJobFolder\Launch" -Force
-            }
-            New-Item -ItemType Directory -Path "$strJobFolder\Output" -Force
-            New-Item -ItemType Directory -Path "$strJobFolder\Reports" -Force
-            New-Item -ItemType Directory -Path "$strJobFolder\Sent" -Force
-            New-Item -ItemType Directory -Path "$strJobFolder\Old" -Force
-
-            Move-Item -Path "$InterimSubFolder\$FileName" -Destination "$strJobFolder\Original\"
-
-            Remove-Item -Path $InterimSubFolder -Recurse -Force
+            $strSourceFolder = "$RootJobFolder$($JobNumber.Trim())_$($RunNumber.Trim())\Original\"
+            $strSourceFile = $FileName
         }
 
-        $FileCopied = $true
-
-        if ($FileName.TrimEnd() -ne $FileName.Trim()) {
-            Move-Item -Path "$strJobFolder\Original\$($FileName.TrimEnd())" -Destination "$strJobFolder\Original\$($FileName.Trim())"
-            $FileName = $FileName.Trim()
-        }
-
-        $JobRunStatus = "Pre-Processing"
-        Update-RunStatus -strRunID $RunID -strStatus $JobRunStatus -intError 0 -strTTP ""
-        Set-Actions -JobRunStatus $JobRunStatus
-
-        Write-Host "Folders Created and Source File Copied"
-    }
-}
-
-# Define Get-LaunchFolder function
-function Get-LaunchFolder {
-    param (
-        [string]$JobNumber
-    )
-    $connectionString = "Server=your_server;Database=DataBureauDataLoadAudit;Integrated Security=True;"
-    $sql = "SELECT LaunchFolder FROM dbo.CT_Jobs WHERE Job_Number='$JobNumber'"
-    $result = Query-SQL -sql $sql -connectionString $connectionString
-
-    if ($null -eq $result.Rows[0].LaunchFolder) {
-        return 0
-    } else {
-        return [int]$result.Rows[0].LaunchFolder
-    }
-}
-
-# Define Trim function
-function Trim {
-    param (
-        [string]$varIn
-    )
-
-    if ($null -eq $varIn) {
-        return ""
-    } else {
-        return $varIn.Trim()
-    }
-}
-
-# Define UpdateRunStatus function
-function Update-RunStatus {
-    param (
-        [string]$strRunID,
-        [string]$strStatus,
-        [int]$intError,
-        [string]$strTTP
-    )
-    $connectionString = "Server=your_server;Database=DataBureauDataLoadAudit;Integrated Security=True;"
-
-    # Update the run status for the given job
-    $updateQuery = "UPDATE dbo.CT_JobRun SET RunStatus = '$strStatus' WHERE CT_RunID = $strRunID"
-    Execute-SQLCommand -sql $updateQuery -connectionString $connectionString
-
-    # Add an entry to the run status audit log
-    if ($strStatus.ToLower() -eq "failed") {
-        $insertQuery = @"
-INSERT INTO dbo.CT_RunStatusLog (CT_RunID, CT_Status, UserName, UpdateDate, ErrorType, TTP)
-SELECT $strRunID, '$strStatus', '$strUserName', GETDATE(), ErrorType, '$strTTP'
-FROM dbo.CT_ErrorType
-WHERE CT_ErrorID = $(Trim $intError)
+        $connectionString = "Server=your_server;Database=neptune;Integrated Security=True;"
+        $strSQL = @"
+SELECT j.JobNo as jobno, j.CustomerID, j.versioninc, j.stateid, s.StepStateID 
+FROM dbo.Jis j 
+INNER JOIN (SELECT MAX(jisid) jisid FROM dbo.Jis WHERE jobno='$($JobNumber.Trim())') M 
+ON j.jisid = M.jisid 
+INNER JOIN dbo.JisStep s ON j.jisid = s.jisid 
+WHERE s.stepid = 204
 "@
-    } else {
-        $insertQuery = "INSERT INTO dbo.CT_RunStatusLog (CT_RunID, CT_Status, UserName, UpdateDate) VALUES ($strRunID, '$strStatus', '$strUserName', GETDATE())"
-    }
-    Execute-SQLCommand -sql $insertQuery -connectionString $connectionString
+        $result = Query-SQL -sql $strSQL -connectionString $connectionString
 
-    # If completed, update the job run with completion date
-    if ($strStatus.ToLower() -eq "complete") {
-        $completionQuery = "UPDATE dbo.CT_JobRun SET CompletedDate = GETDATE() WHERE CT_RunID = $strRunID"
-        Execute-SQLCommand -sql $completionQuery -connectionString $connectionString
+        if ($result.Rows.Count -eq 0) {
+            Write-Host "Run Not Launched, This job number isn't setup for Auto Launch"
+            return $false
+        } elseif ($result.Rows[0].StateID -ne 90 -and $result.Rows[0].VersionInc -eq 0) {
+            Write-Host "Run Not Launched, Initial run of this job is not completed and verified"
+            return $false
+        } elseif ($result.Rows[0].StepStateID -ne 20) {
+            Write-Host "Run Not Launched, Data still being imported for previous run"
+            return $false
+        } else {
+            $strSQL = "SELECT COUNT(*) AS GotEntry FROM dbo.MonitoredFiles WHERE islocked = 1 AND username IS NULL AND Filename = '$strSourceFile' AND Folder LIKE '%$($JobNumber.Trim())%'"
+            $result = Query-SQL -sql $strSQL -connectionString $connectionString
+
+            if ($result.Rows[0].GotEntry -gt 0) {
+                Write-Host "Run Not Launched, There is already a partial launch for this run, contact Support"
+                return $false
+            } else {
+                if (-Not (Test-Path $strTarget)) {
+                    New-Item -ItemType Directory -Path $strTarget -Force
+                }
+
+                if (Test-Path "$strTarget$strSourceFile") {
+                    Remove-Item -Path "$strTarget$strSourceFile" -Force
+                    Start-Sleep -Seconds 5
+                }
+
+                Copy-Item -Path "$strSourceFolder$strSourceFile" -Destination $strTarget -Force
+                Check-LaunchAutoLaunch -strTarget $strTarget -strSourceFile $strSourceFile -strUserName $strUserName -JobNumber $JobNumber -RunNumber $RunNumber -RunID $RunID
+            }
+        }
     }
+
+    return $blnProceed
+}
+
+# CanLaunchJob function
+function Can-LaunchJob {
+    param (
+        [string]$RunID,
+        [string]$JobType,
+        [string]$JobNumber,
+        [int]$RunNumber
+    )
+
+    $connectionString = "Server=your_server;Database=DataBureauDataLoadAudit;Integrated Security=True;"
+    $strSQL = "EXEC dbo.up_CT_IsLaunchEnabled"
+    $result = Query-SQL -sql $strSQL -connectionString $connectionString
+
+    if ($result.Rows.Count -eq 0 -or $result.Rows[0].ConfigValue.ToLower() -ne "true") {
+        Write-Host "Launch Currently Disabled"
+        return $false
+    }
+
+    if ($JobType.ToLower() -eq "dpp") {
+        $strSQL = "EXEC dbo.up_CT_DPP_LaunchCheck"
+        $result = Query-SQL -sql $strSQL -connectionString $connectionString
+
+        if ($result.Rows.Count -eq 0 -or $result.Rows[0].Enabled -ne $true) {
+            Write-Host "DPP Launch on $($result.Rows[0].Environment) Currently Disabled"
+            return $false
+        }
+    }
+
+    Check-NeptuneStatus
+
+    $strSQL = "SELECT COUNT(*) AS JobsRunning FROM dbo.CT_JobRun WHERE RunStatus = 'Running'"
+    $result = Query-SQL -sql $strSQL -connectionString $connectionString
+    $intJobsRunning = $result.Rows[0].JobsRunning
+
+    if ($intJobsRunning -ge 10) {
+        $msgResult = Read-Host "There are already $intJobsRunning jobs running, Do you wish to Launch This job? (Y/N)"
+        if ($msgResult -ne "Y") {
+            return $false
+        }
+    }
+
+    $strSQL = "EXEC dbo.up_CT_PreviousRunCheck '$JobNumber', $RunNumber"
+    $result = Query-SQL -sql $strSQL -connectionString $connectionString
+    $intPriorRuns = $result.Rows[0].PriorRuns
+
+    if ($intPriorRuns -gt 0) {
+        Write-Host "$intPriorRuns previous run(s) for this job has not finished processing, for now you cannot launch this job"
+        return $false
+    }
+
+    if ($RunNumber -eq 0) {
+        Update-RunStatus -strRunID $RunID -strStatus "Running" -intError 0 -strTTP ""
+        Set-Actions -JobRunStatus "Running"
+        return $false
+    }
+
+    return $true
+}
+
+# CheckNeptuneStatus function
+function Check-NeptuneStatus {
+    $connectionString = "Server=your_server;Database=DataBureauDataLoadAudit;Integrated Security=True;"
+    $strSQL = "SELECT * FROM dbo.vw_CT_JobRunStatus"
+    $result = Query-SQL -sql $strSQL -connectionString $connectionString
+
+    foreach ($row in $result.Rows) {
+        $NewState = $row.NewState
+        $OldState = $row.OldState
+
+        if ($NewState -ne $OldState -and $NewState -ne "") {
+            if ($NewState -eq "Neptune Complete") {
+                $strSQL = "UPDATE R SET R.volume = REPLACE(V.Volume,'*','') FROM dbo.ct_jobrun R INNER JOIN dbo.vw_CallTraceCurrentJobsV4 V ON R.CT_RunID = V.RunID WHERE V.Volume <> '?' AND R.volume IS NULL"
+                Execute-SQLCommand -sql $strSQL -connectionString $connectionString
+            }
+
+            Update-RunStatus -strRunID $row.RunID -strStatus $NewState -intError 0 -strTTP ""
+        }
+    }
+
+    $strSQL = "SELECT JobNo, RunNo FROM dbo.vw_CallTraceCurrentJobsV4 WHERE ISNULL(teleappend,'?') = '?'"
+    $result = Query-SQL -sql $strSQL -connectionString $connectionString
+
+    foreach ($row in $result.Rows) {
+        $strJobNumber = $row.JobNo
+        $strRunNumber = $row.RunNo
+        $strSQL = "EXEC dbo.up_CT_FlagTeleAppend '$strJobNumber','$strRunNumber'"
+        Execute-SQLCommand -sql $strSQL -connectionString $connectionString
+    }
+}
+
+# CheckLaunch_AutoLaunch function
+function Check-LaunchAutoLaunch {
+    param (
+        [string]$strTarget,
+        [string]$strSourceFile,
+        [string]$strUserName,
+        [string]$JobNumber,
+        [int]$RunNumber,
+        [string]$RunID
+    )
+
+    $connectionString = "Server=your_server;Database=neptune;Integrated Security=True;"
+    $strSQL = "EXEC dbo.up_CT_GetLaunchID '$JobNumber', '$strSourceFile'"
+    $result = Query-SQL -sql $strSQL -connectionString $connectionString
+    $MonitorID = $result.Rows[0].MonitorID
+
+    if ($MonitorID -gt 0) {
+        $strSQL = "EXEC dbo.up_CT_ConfirmLaunch '$JobNumber','$RunNumber',$MonitorID,'$strUserName'"
+        Execute-SQLCommand -sql $strSQL -connectionString $connectionString
+        Write-Host "Launch Succeeded"
+        Update-RunStatus -strRunID $RunID -strStatus "Running" -intError 0 -strTTP ""
+        Set-Actions -JobRunStatus "Running"
+        Close-DetailsPageAutoLaunch -RunID $RunID
+    } else {
+        Remove-Item -Path "$strTarget$strSourceFile" -Force
+        Write-Host "Launch Failed, Check File Watcher is Active"
+    }
+}
+
+# Close_DetailsPage_AutoLaunch function (assuming implementation is provided)
+function Close-DetailsPageAutoLaunch {
+    param (
+        [string]$RunID
+    )
+    # Implement the function as needed
 }
