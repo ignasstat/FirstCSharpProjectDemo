@@ -13,6 +13,12 @@ function QuerySQL {
         $table.Load($result)
         $connection.Close()
         Write-Host "Rows loaded inside function: $($table.Rows.Count)"
+        
+        # Print columns information
+        foreach ($col in $table.Columns) {
+            Write-Host "Column: $($col.ColumnName), Type: $($col.DataType)"
+        }
+        
         return $table
     } catch {
         Write-Host "Error: $_"
@@ -27,6 +33,8 @@ $result = QuerySQL -sql $sql -dbconnectionString $dbconnectionString
 
 if ($result -ne $null) {
     Write-Host "Number of rows in the result: $($result.Rows.Count)"
+    
+    # Print rows information
     foreach ($row in $result.Rows) {
         Write-Host "Folder: $($row['Folder']), Filename: $($row['Filename'])"
     }
