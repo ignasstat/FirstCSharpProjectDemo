@@ -1,47 +1,90 @@
-    Param(
-        [String] $sql,
-        [String] $dbconnectionString
+$Global:dbconnectionString = "Data Source=pllwinlvsql002\mb21,1433;Integrated Security=SSPI;Initial Catalog=DataBureauDataLoadAudit"
+function Get-SQLScalar {
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory = $true)] [String] $Query
     )
-    try {
-        $connection = New-Object System.Data.SqlClient.SqlConnection($dbconnectionString)
-        $command = $connection.CreateCommand()
-        $command.CommandText = $sql
-        $connection.Open()
-        $result = $command.ExecuteReader()
-        $table = New-Object System.Data.DataTable
-        $table.Load($result)
-        $connection.Close()
-        Write-Host "Rows loaded inside function: $($table.Rows.Count)"
-        
-        # Print columns information
-        foreach ($col in $table.Columns) {
-            Write-Host "Column: $($col.ColumnName), Type: $($col.DataType)"
+
+    $Connection = New-Object System.Data.SQLClient.SQLConnection($dbconnectionString)
+    $Connection.Open()
+    $Command = New-Object System.Data.SQLClient.SQLCommand($Query, $Connection)
+    $SQLScalar = $Command.ExecuteScalar()
+    $Connection.Close()
+
+    return $SQLScalar
+    }
+
+Function Get-HeaderInFirstRow {
+    param (
+        [string]$jobNumber
+    )
+
+    $sql = "SELECT HeadersInFirstRow FROM neptunefileimporter.[fileimporter].[Jobs] WHERE JobId IN (SELECT Max(JobId) FROM neptunefileimporter.[fileimporter].[Jobs] WHERE DestinationTable = '$jobNumber'"
+    Write-Host $sql
+    $result = Get-SQLScalar -Query $sql 
+    write-host $result.Rows.Count
+
+    if ($result.Rows.Count -gt 0) {
+        return $result
+    } else {
+        Write-Host "Error retrieving HeadersInFirstRow value from fileimporter.Jobs"
+        return $false
+    }
+}
+
+function CheckFileExists_Local($myFile, $headerInFirstRow) {
+    if (-Not (Test-Path $myFile)) {
+        return "not found"
+    } else {
+        $fileInfo = Get-Item $myFile
+        if ($fileInfo.Length -gt 0) {
+            if ($headerInFirstRow) {
+                if (ContainsMultipleLines $myFile) {
+                    return "OK"
+                } else {
+                    return "Is empty"
+                }
+            } else {
+                return "OK"
+            }
+        } else {
+            return "Is empty"
         }
-        
-        return $table
+    }
+}
+
+function ContainsMultipleLines($fileName) {
+    $lineCount = 0
+    try {
+        $reader = [System.IO.File]::OpenText($fileName)
+        while (-not $reader.EndOfStream -and $lineCount -lt 2) {
+            $reader.ReadLine()
+            $lineCount++
+        }
+        $reader.Close()
     } catch {
-        Write-Host "Error: $_"
-        return $null
+        Write-Host "Error reading file $fileName"
     }
+    return $lineCount -gt 1
 }
+$jobNumber = 'CDA100966'
+$Heada = Get-HeaderInFirstRow -jobNumber $jobNumber
 
-$dbconnectionString = "Test"
-$sql = "SELECT Folder, Filename FROM dbo.vw_ExistingFiles WHERE fileid = 348054"
+$file = "\\cig.local\data\AppData\SFTP\Data\Usr\DataBureau\Configuration\Scripts\Test\CallTrace Console\CTC124_125\ToProcess\123.trg"
 
-$result = QuerySQL -sql $sql -dbconnectionString $dbconnectionString
+$ats = CheckFileExists_Local -myFile $file -headerInFirstRow $Heada
 
-if ($result -ne $null) {
-    Write-Host "Number of rows in the result: $($result.Rows.Count)"
-    
-    # Print rows information
-    foreach ($row in $result.Rows) {
-        Write-Host "Folder: $($row['Folder']), Filename: $($row['Filename'])"
-    }
-} else {
-    Write-Host "No data returned from the query."
-}
 
-Rows loaded inside function: 1
-Column: Folder, Type: string
-Column: Filename, Type: string
-Number of rows in the result: 0
+
+
+SELECT HeadersInFirstRow FROM neptunefileimporter.[fileimporter].[Jobs] WHERE JobId IN (SELECT Max(JobId) FROM neptunefileimporter.[fileimporter].[Jobs] WHERE DestinationTable = 'CDA100966'
+Exception calling "ExecuteScalar" with "0" argument(s): "Incorrect syntax near 'CDA100966'."
+At line:12 char:5
++     $SQLScalar = $Command.ExecuteScalar()
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : SqlException
+ 
+0
+Error retrieving HeadersInFirstRow value from fileimporter.Jobs
