@@ -20,21 +20,16 @@ function QuerySQL {
     }
 }
 
-
 $dbconnectionString = "Data Source=server_name;Integrated Security=SSPI;Initial Catalog=database_name"
 $sql = "SELECT Folder, Filename FROM dbo.vw_ExistingFiles WHERE fileid = 348054"
 
 $result = QuerySQL -sql $sql -dbconnectionString $dbconnectionString
 
-# Access data from the result
-if ($result -ne $null -and $result.Rows.Count -gt 0) {
+if ($result -ne $null) {
+    Write-Host "Number of rows in the result: $($result.Rows.Count)"
     foreach ($row in $result.Rows) {
-        Write-Host "Folder: $($row['Folder']) - Filename: $($row['Filename'])"
+        Write-Host "Folder: $($row['Folder']), Filename: $($row['Filename'])"
     }
-
-    # Storing specific data in a variable
-    $firstFolder = $result.Rows[0]["Folder"]
-    Write-Host "First folder retrieved: $firstFolder"
 } else {
-    Write-Host "No rows returned or an error occurred."
+    Write-Host "No data returned from the query."
 }
