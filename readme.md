@@ -12,7 +12,7 @@ function QuerySQL {
         $table = New-Object System.Data.DataTable
         $table.Load($result)
         $connection.Close()
-        Write-Host "Rows loaded: $($table.Rows.Count)"
+        Write-Host "Rows loaded inside function: $($table.Rows.Count)"
         return $table
     } catch {
         Write-Host "Error: $_"
