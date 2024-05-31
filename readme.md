@@ -1,4 +1,3 @@
-function QuerySQL {
     Param(
         [String] $sql,
         [String] $dbconnectionString
@@ -26,7 +25,7 @@ function QuerySQL {
     }
 }
 
-$dbconnectionString = "Data Source=server_name;Integrated Security=SSPI;Initial Catalog=database_name"
+$dbconnectionString = "Test"
 $sql = "SELECT Folder, Filename FROM dbo.vw_ExistingFiles WHERE fileid = 348054"
 
 $result = QuerySQL -sql $sql -dbconnectionString $dbconnectionString
@@ -41,3 +40,8 @@ if ($result -ne $null) {
 } else {
     Write-Host "No data returned from the query."
 }
+
+Rows loaded inside function: 1
+Column: Folder, Type: string
+Column: Filename, Type: string
+Number of rows in the result: 0
