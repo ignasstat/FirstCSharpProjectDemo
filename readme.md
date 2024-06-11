@@ -1,61 +1,322 @@
-function CheckFileExists_EFT {
-    param (
-        [int]$lngFileID,
-        [string]$jobNumber,
-        [bool]$headerInFirstRow,
-        [string]$strFile
-    )
+Sub CreateDecryptionNode(ByVal GUIDString As String, ByRef ActionListNames As String, ByVal SaveLocation As String, ByRef nodeStep As Integer, ByVal FileName As String, ByVal SourceFolder As String, ByVal PGPFolder As String, ByVal PGP_Name As String, ByVal JobNumber As String, ByVal JobClient As String)
     
-    # Define base folders
-    $fileExistsTriggerFolder = "PathToYourTriggerFolder"  # Update this path as necessary
-    $toProcessFolder = Join-Path $fileExistsTriggerFolder "ToProcess"
-    $foundFolder = Join-Path $fileExistsTriggerFolder "Found"
-    $notFoundFolder = Join-Path $fileExistsTriggerFolder "NotFound"
+    Dim XML_Action As IXMLDOMElement
+    Dim XML_Child  As IXMLDOMElement
     
-    # Define specific file paths
-    $triggerFilePath = Join-Path $toProcessFolder "$lngFileID.trg"
-    $foundNotEmptyPath = Join-Path $foundFolder "NotEmpty\$lngFileID.trg"
-    $foundEmptyPath = Join-Path $foundFolder "Empty\$lngFileID.trg"
-    $fileNotFoundPath = Join-Path $notFoundFolder "$lngFileID.trg"
+    Dim XML_Doc             As DOMDocument
+    Dim XML_RootElement     As IXMLDOMElement
+    Dim XML_Attribute       As IXMLDOMAttribute
+    Dim XML_Element         As IXMLDOMElement
+    Dim ActionXMLPath       As String
     
-    # Delete existing trigger files
-    Remove-Item -Path $foundNotEmptyPath, $foundEmptyPath, $fileNotFoundPath, $triggerFilePath -ErrorAction SilentlyContinue
+    'Setup the xml
+    Set XML_Doc = New DOMDocument
+    XML_Doc.async = False
+    XML_Doc.validateOnParse = False
     
-    # Create a new trigger file with details
-    [System.IO.File]::WriteAllLines($triggerFilePath, @($strFile, $jobNumber, $headerInFirstRow))
+    'Create temporary folder for decryption
+    '----------------------------------------------------------------------------------------------------------------------------------------
+    Set XML_Action = XML_Doc.createElement("EFT_Action")
+    XML_Doc.appendChild XML_Action
     
-    # Check for trigger file appearance in specified folders
-    $maxAttempts = 3
-    for ($attemptCount = 0; $attemptCount -lt $maxAttempts; $attemptCount++) {
-        Start-Sleep -Seconds 3
-        
-        if (Test-Path $foundNotEmptyPath -or Test-Path $foundEmptyPath -or Test-Path $fileNotFoundPath) {
-            break
-        }
-    }
+    Call XML_AddNode(XML_Doc, XML_Action, "ProcessPriority", "50")
+    Call XML_AddNode(XML_Doc, XML_Action, "GUID", GUIDString)
+    Call XML_AddNode(XML_Doc, XML_Action, "StepSequence", CStr(nodeStep))
+    Call XML_AddNode(XML_Doc, XML_Action, "CreationDTS", Format(Now, "yyyy-MM-dd hh:mm:ss"))
+    Call XML_AddNode(XML_Doc, XML_Action, "RetriesRemaining", "2")
+    Call XML_AddNode(XML_Doc, XML_Action, "LastAttemptDTS", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "LastResult", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "FailureNotificationEmail", "")
+    
+    'Populate FailureNotificationEmail child notes with email info
+    '----------------------------------
+    Set XML_Child = XML_Action.LastChild
+    Call XML_AddNode(XML_Doc, XML_Child, "To", "DataOperationsEFT-CD@transunion.co.uk")
+    Call XML_AddNode(XML_Doc, XML_Child, "CC", "DataBureau@transunion.co.uk")
+    Call XML_AddNode(XML_Doc, XML_Child, "BCC", "")
+    Call XML_AddNode(XML_Doc, XML_Child, "Subject", "DTP - " & JobClient & " - " & JobNumber & " - Folder Creation - Failed")
+    Call XML_AddNode(XML_Doc, XML_Child, "Message", "The DTP has failed at creating folder while decrypting " & PGPFolder & vbCrLf)
+    '----------------------------------
+    
+    Call XML_AddNode(XML_Doc, XML_Action, "ActionType", "CreateFolder")
+    Call XML_AddNode(XML_Doc, XML_Action, "SourceFolder", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "SourceFile", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "DestinationFolder", PGPFolder)
+    Call XML_AddNode(XML_Doc, XML_Action, "DestinationFile", "")
+    
+    'Need to create a name for Action.xml
+    'Pad the nodeStep with leading zero if neccessary
+    ActionXMLPath = SaveLocation & "50_" & GUIDString & "_" & Format(nodeStep, "#00") & ".xml"
+    
+    XML_Doc.Save (ActionXMLPath)
+    ActionListNames = ActionListNames & ActionXMLPath & ";"
+    
+    nodeStep = nodeStep + 1
+    '----------------------------------------------------------------------------------------------------------------------------------------
+    
+    'Copy to temporary decryption folder
+    '----------------------------------------------------------------------------------------------------------------------------------------
+    'Setup the xml
+    Set XML_Doc = New DOMDocument
+    XML_Doc.async = False
+    XML_Doc.validateOnParse = False
+    
+    Set XML_Action = XML_Doc.createElement("EFT_Action")
+    XML_Doc.appendChild XML_Action
+    
+    Call XML_AddNode(XML_Doc, XML_Action, "ProcessPriority", "50")
+    Call XML_AddNode(XML_Doc, XML_Action, "GUID", GUIDString)
+    Call XML_AddNode(XML_Doc, XML_Action, "StepSequence", CStr(nodeStep))
+    Call XML_AddNode(XML_Doc, XML_Action, "CreationDTS", Format(Now, "yyyy-MM-dd hh:mm:ss"))
+    Call XML_AddNode(XML_Doc, XML_Action, "RetriesRemaining", "2")
+    Call XML_AddNode(XML_Doc, XML_Action, "LastAttemptDTS", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "LastResult", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "FailureNotificationEmail", "")
+    
+    'Populate FailureNotificationEmail child notes with email info
+    '----------------------------------
+    Set XML_Child = XML_Action.LastChild
+    Call XML_AddNode(XML_Doc, XML_Child, "To", "DataOperationsEFT-CD@transunion.co.uk")
+    Call XML_AddNode(XML_Doc, XML_Child, "CC", "DataBureau@transunion.co.uk")
+    Call XML_AddNode(XML_Doc, XML_Child, "BCC", "")
+    Call XML_AddNode(XML_Doc, XML_Child, "Subject", "DTP - " & JobClient & " - " & JobNumber & " - File Transfer - Failed")
+    Call XML_AddNode(XML_Doc, XML_Child, "Message", "The DTP has failed before decryption to copy " & FileName & vbCrLf & "From: " & SourceFolder & vbCrLf & "To: " & PGPFolder & vbCrLf)
+    '----------------------------------
+    
+    Call XML_AddNode(XML_Doc, XML_Action, "ActionType", "Copy")
+    Call XML_AddNode(XML_Doc, XML_Action, "SourceFolder", SourceFolder)
+    Call XML_AddNode(XML_Doc, XML_Action, "SourceFile", FileName)
+    Call XML_AddNode(XML_Doc, XML_Action, "DestinationFolder", PGPFolder)
+    Call XML_AddNode(XML_Doc, XML_Action, "DestinationFile", "")
+    
+    'Need to create a name for Action.xml
+    'Pad the nodeStep with leading zero if neccessary
+    ActionXMLPath = SaveLocation & "50_" & GUIDString & "_" & Format(nodeStep, "#00") & ".xml"
+    
+    XML_Doc.Save (ActionXMLPath)
+    ActionListNames = ActionListNames & ActionXMLPath & ";"
+    
+    nodeStep = nodeStep + 1
+    '----------------------------------------------------------------------------------------------------------------------------------------
+    
+    'Decryption Action
+    '----------------------------------------------------------------------------------------------------------------------------------------
+    'Setup the xml
+    Set XML_Doc = New DOMDocument
+    XML_Doc.async = False
+    XML_Doc.validateOnParse = False
+    
+    Set XML_Action = XML_Doc.createElement("EFT_Action")
+    XML_Doc.appendChild XML_Action
+    
+    Call XML_AddNode(XML_Doc, XML_Action, "ProcessPriority", "50")
+    Call XML_AddNode(XML_Doc, XML_Action, "GUID", GUIDString)
+    Call XML_AddNode(XML_Doc, XML_Action, "StepSequence", CStr(nodeStep))
+    Call XML_AddNode(XML_Doc, XML_Action, "CreationDTS", Format(Now, "yyyy-MM-dd hh:mm:ss"))
+    Call XML_AddNode(XML_Doc, XML_Action, "RetriesRemaining", "2")
+    Call XML_AddNode(XML_Doc, XML_Action, "LastAttemptDTS", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "LastResult", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "FailureNotificationEmail", "")
+    
+    'Populate FailureNotificationEmail child nodes with email info
+    '---------------------------------------------
+    Set XML_Child = XML_Action.LastChild
+    Call XML_AddNode(XML_Doc, XML_Child, "To", "DataOperationsEFT-CD@transunion.co.uk")
+    Call XML_AddNode(XML_Doc, XML_Child, "CC", "DataBureau@transunion.co.uk")
+    Call XML_AddNode(XML_Doc, XML_Child, "BCC", "")
+    Call XML_AddNode(XML_Doc, XML_Child, "Subject", "DTP - " & JobClient & " - " & JobNumber & " - File Decryption - Failed")
+    Call XML_AddNode(XML_Doc, XML_Child, "Message", "The DTP has failed at decrypting " & FileName & " in " & PGPFolder & vbCrLf)
+    '---------------------------------------------
+    
+    Call XML_AddNode(XML_Doc, XML_Action, "ActionType", "Decrypt")
+    Call XML_AddNode(XML_Doc, XML_Action, "SourceFolder", PGPFolder)
+    Call XML_AddNode(XML_Doc, XML_Action, "SourceFile", FileName)
+    Call XML_AddNode(XML_Doc, XML_Action, "DestinationFolder", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "DestinationFile", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "EncryptionKey", PGP_Name)
+    
+    'Need to create a name for Action.xml
+    'Pad the nodeStep with leading zero if neccessary
+    ActionXMLPath = SaveLocation & "50_" & GUIDString & "_" & Format(nodeStep, "#00") & ".xml"
+    
+    XML_Doc.Save (ActionXMLPath)
+    ActionListNames = ActionListNames & ActionXMLPath & ";"
+    
+    nodeStep = nodeStep + 1
+    '----------------------------------------------------------------------------------------------------------------------------------------
+End Sub
 
-    # Handling file found scenarios
-    if ($attemptCount -eq $maxAttempts) {
-        Write-Host "Trigger file not found after multiple attempts."
-        return "trigger notfound"
-    }
 
-    if (Test-Path $fileNotFoundPath) {
-        Remove-Item $fileNotFoundPath -ErrorAction SilentlyContinue
-        return "not found"
-    } elseif (Test-Path $foundNotEmptyPath) {
-        Remove-Item $foundNotEmptyPath -ErrorAction SilentlyContinue
-        return "OK"
-    } elseif (Test-Path $foundEmptyPath) {
-        Remove-Item $foundEmptyPath -ErrorAction SilentlyContinue
-        return "Is empty"
-    }
-}
 
-# Example Usage:
-$lngFileID = 12345
-$jobNumber = 'Job001'
-$headerInFirstRow = $true
-$strFile = 'example.txt'
-$result = CheckFileExists_EFT -lngFileID $lngFileID -jobNumber $jobNumber -headerInFirstRow $headerInFirstRow -strFile $strFile
-Write-Host "Result: $result"
+Sub CreateCopyNode(ByVal GUIDString As String, ByRef ActionListNames As String, ByVal SaveLocation As String, ByRef nodeStep As Integer, ByVal SourceFolder As String, ByVal DestinationFolder As String, ByVal FileToCopy As Variant, ByVal JobNumber As String, ByVal JobClient As String)
+    
+    Dim XML_Action As IXMLDOMElement
+    Dim XML_Child  As IXMLDOMElement
+    
+    Dim XML_Doc             As DOMDocument
+    Dim XML_RootElement     As IXMLDOMElement
+    Dim XML_Attribute       As IXMLDOMAttribute
+    Dim XML_Element         As IXMLDOMElement
+    Dim ActionXMLPath       As String
+    
+    'Setup the xml
+    Set XML_Doc = New DOMDocument
+    XML_Doc.async = False
+    XML_Doc.validateOnParse = False
+    
+    'Copy file from interim or temporary PGP location
+    '----------------------------------------------------------------------------------------------------------------------------------------
+    Set XML_Action = XML_Doc.createElement("EFT_Action")
+    XML_Doc.appendChild XML_Action
+    
+    Call XML_AddNode(XML_Doc, XML_Action, "ProcessPriority", "50")
+    Call XML_AddNode(XML_Doc, XML_Action, "GUID", GUIDString)
+    Call XML_AddNode(XML_Doc, XML_Action, "StepSequence", CStr(nodeStep))
+    Call XML_AddNode(XML_Doc, XML_Action, "CreationDTS", Format(Now, "yyyy-MM-dd hh:mm:ss"))
+    Call XML_AddNode(XML_Doc, XML_Action, "RetriesRemaining", "2")
+    Call XML_AddNode(XML_Doc, XML_Action, "LastAttemptDTS", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "LastResult", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "FailureNotificationEmail", "")
+    
+    'Populate FailureNotificationEmail child notes with email info
+    '----------------------------------
+    Set XML_Child = XML_Action.LastChild
+    Call XML_AddNode(XML_Doc, XML_Child, "To", "DataOperationsEFT-CD@transunion.co.uk")
+    Call XML_AddNode(XML_Doc, XML_Child, "CC", "DataBureau@transunion.co.uk")
+    Call XML_AddNode(XML_Doc, XML_Child, "BCC", "")
+    Call XML_AddNode(XML_Doc, XML_Child, "Subject", "DTP - " & JobClient & " - " & JobNumber & " - File Transfer - Failed")
+    Call XML_AddNode(XML_Doc, XML_Child, "Message", "The DTP has failed to copy " & FileToCopy & vbCrLf & "From: " & SourceFolder & vbCrLf & "To: " & DestinationFolder & vbCrLf)
+    '----------------------------------
+    
+    Call XML_AddNode(XML_Doc, XML_Action, "ActionType", "Copy")
+    Call XML_AddNode(XML_Doc, XML_Action, "SourceFolder", SourceFolder)
+    Call XML_AddNode(XML_Doc, XML_Action, "SourceFile", CStr(FileToCopy))
+    Call XML_AddNode(XML_Doc, XML_Action, "DestinationFolder", DestinationFolder)
+    Call XML_AddNode(XML_Doc, XML_Action, "DestinationFile", "")
+    
+    'Need to create a name for Action.xml
+    'Pad the nodeStep with leading zero if neccessary
+    ActionXMLPath = SaveLocation & "50_" & GUIDString & "_" & Format(nodeStep, "#00") & ".xml"
+    
+    XML_Doc.Save (ActionXMLPath)
+    ActionListNames = ActionListNames & ActionXMLPath & ";"
+    
+    nodeStep = nodeStep + 1
+    '----------------------------------------------------------------------------------------------------------------------------------------
+    
+End Sub
+
+
+
+Sub CreateDeletionNode(ByVal GUIDString As String, ByRef ActionListNames As String, ByVal SaveLocation As String, ByRef nodeStep As Integer, FolderToDelete As String, ByVal JobNumber As String, ByVal JobClient As String)
+
+    Dim XML_Action As IXMLDOMElement
+    Dim XML_Child  As IXMLDOMElement
+    
+    Dim XML_Doc             As DOMDocument
+    Dim XML_RootElement     As IXMLDOMElement
+    Dim XML_Attribute       As IXMLDOMAttribute
+    Dim XML_Element         As IXMLDOMElement
+    Dim ActionXMLPath       As String
+    
+    'Setup the xml
+    Set XML_Doc = New DOMDocument
+    XML_Doc.async = False
+    XML_Doc.validateOnParse = False
+
+    Set XML_Action = XML_Doc.createElement("EFT_Action")
+    XML_Doc.appendChild XML_Action
+    
+    Call XML_AddNode(XML_Doc, XML_Action, "ProcessPriority", "50")
+    Call XML_AddNode(XML_Doc, XML_Action, "GUID", GUIDString)
+    Call XML_AddNode(XML_Doc, XML_Action, "StepSequence", CStr(nodeStep))
+    Call XML_AddNode(XML_Doc, XML_Action, "CreationDTS", Format(Now, "yyyy-MM-dd hh:mm:ss"))
+    Call XML_AddNode(XML_Doc, XML_Action, "RetriesRemaining", "2")
+    Call XML_AddNode(XML_Doc, XML_Action, "LastAttemptDTS", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "LastResult", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "FailureNotificationEmail", "")
+    
+    'Populate FailureNotificationEmail child notes with email info
+    '----------------------------------
+    Set XML_Child = XML_Action.LastChild
+    Call XML_AddNode(XML_Doc, XML_Child, "To", "DataOperationsEFT-CD@transunion.co.uk")
+    Call XML_AddNode(XML_Doc, XML_Child, "CC", "DataBureau@transunion.co.uk")
+    Call XML_AddNode(XML_Doc, XML_Child, "BCC", "")
+    Call XML_AddNode(XML_Doc, XML_Child, "Subject", "DTP failure")
+    Call XML_AddNode(XML_Doc, XML_Child, "Message", "The DTP has failed to delete folder " & FolderToDelete & vbCrLf)
+    '----------------------------------
+    
+    Call XML_AddNode(XML_Doc, XML_Action, "ActionType", "DeleteFolder")
+    Call XML_AddNode(XML_Doc, XML_Action, "SourceFolder", FolderToDelete)
+    Call XML_AddNode(XML_Doc, XML_Action, "SourceFile", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "DestinationFolder", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "DestinationFile", "")
+    
+    'Need to create a name for Action.xml
+    'Pad the nodeStep with leading zero if neccessary
+    ActionXMLPath = SaveLocation & "50_" & GUIDString & "_" & Format(nodeStep, "#00") & ".xml"
+    
+    XML_Doc.Save (ActionXMLPath)
+    ActionListNames = ActionListNames & ActionXMLPath & ";"
+    
+    nodeStep = nodeStep + 1
+End Sub
+
+
+Sub CreateMoveNode(ByVal GUIDString As String, ByRef ActionListNames As String, ByVal SaveLocation As String, ByRef nodeStep As Integer, ByVal SourceFolder As String, ByVal DestinationFolder As String, ByVal FileToCopy As Variant, ByVal JobNumber As String, ByVal JobClient As String)
+    
+    Dim XML_Action As IXMLDOMElement
+    Dim XML_Child  As IXMLDOMElement
+    
+    Dim XML_Doc             As DOMDocument
+    Dim XML_RootElement     As IXMLDOMElement
+    Dim XML_Attribute       As IXMLDOMAttribute
+    Dim XML_Element         As IXMLDOMElement
+    Dim ActionXMLPath       As String
+    
+    'Setup the xml
+    Set XML_Doc = New DOMDocument
+    XML_Doc.async = False
+    XML_Doc.validateOnParse = False
+
+    'Move file from interim or temporary PGP location
+    '----------------------------------------------------------------------------------------------------------------------------------------
+    Set XML_Action = XML_Doc.createElement("EFT_Action")
+    XML_Doc.appendChild XML_Action
+    
+    Call XML_AddNode(XML_Doc, XML_Action, "ProcessPriority", "50")
+    Call XML_AddNode(XML_Doc, XML_Action, "GUID", GUIDString)
+    Call XML_AddNode(XML_Doc, XML_Action, "StepSequence", CStr(nodeStep))
+    Call XML_AddNode(XML_Doc, XML_Action, "CreationDTS", Format(Now, "yyyy-MM-dd hh:mm:ss"))
+    Call XML_AddNode(XML_Doc, XML_Action, "RetriesRemaining", "2")
+    Call XML_AddNode(XML_Doc, XML_Action, "LastAttemptDTS", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "LastResult", "")
+    Call XML_AddNode(XML_Doc, XML_Action, "FailureNotificationEmail", "")
+    
+    'Populate FailureNotificationEmail child notes with email info
+    '----------------------------------
+    Set XML_Child = XML_Action.LastChild
+    Call XML_AddNode(XML_Doc, XML_Child, "To", "DataOperationsEFT-CD@transunion.co.uk")
+    Call XML_AddNode(XML_Doc, XML_Child, "CC", "DataBureau@transunion.co.uk")
+    Call XML_AddNode(XML_Doc, XML_Child, "BCC", "")
+    Call XML_AddNode(XML_Doc, XML_Child, "Subject", "DTP - " & JobClient & " - " & JobNumber & " - File Transfer - Failed")
+    Call XML_AddNode(XML_Doc, XML_Child, "Message", "The DTP has failed to move " & FileToCopy & vbCrLf & "From: " & SourceFolder & vbCrLf & "To: " & DestinationFolder & vbCrLf)
+    '----------------------------------
+    
+    Call XML_AddNode(XML_Doc, XML_Action, "ActionType", "Move")
+    Call XML_AddNode(XML_Doc, XML_Action, "SourceFolder", SourceFolder)
+    Call XML_AddNode(XML_Doc, XML_Action, "SourceFile", CStr(FileToCopy))
+    Call XML_AddNode(XML_Doc, XML_Action, "DestinationFolder", DestinationFolder)
+    Call XML_AddNode(XML_Doc, XML_Action, "DestinationFile", "")
+    
+    'Need to create a name for Action.xml
+    'Pad the nodeStep with leading zero if neccessary
+    ActionXMLPath = SaveLocation & "50_" & GUIDString & "_" & Format(nodeStep, "#00") & ".xml"
+    
+    XML_Doc.Save (ActionXMLPath)
+    ActionListNames = ActionListNames & ActionXMLPath & ";"
+    
+    nodeStep = nodeStep + 1
+    '----------------------------------------------------------------------------------------------------------------------------------------
+
+End Sub
