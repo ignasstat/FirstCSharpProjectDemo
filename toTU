@@ -1,209 +1,43 @@
-# JobLaunch function
-function Job-Launch {
+function CreateDTPXML {
     param (
-        [string]$RunID,
-        [string]$JobType,
-        [string]$JobNumber,
-        [int]$RunNumber,
-        [string]$FileName
-    )
-    
-    $strPotentialFiles = @()
-    $blnProceed = Can-LaunchJob -RunID $RunID -JobType $JobType -JobNumber $JobNumber -RunNumber $RunNumber
-
-    if ($blnProceed) {
-        $strTarget = "$AutoLoadFolder$($JobNumber.Trim())\"
-        $LaunchFolder = Get-LaunchFolder -JobNumber $JobNumber
-
-        if ($LaunchFolder) {
-            $strSourceFolder = "$RootJobFolder$($JobNumber.Trim())_$($RunNumber.Trim())\Launch\*.*"
-            $intI = 0
-            $strPotentialFiles += Get-ChildItem -Path $strSourceFolder -Name
-
-            if ($strPotentialFiles.Count -eq 0) {
-                Write-Host "Move file to Launch into Launch folder and try again"
-                return $false
-            } elseif ($strPotentialFiles.Count -gt 1) {
-                Write-Host "More than one file found in Launch folder, remove other files and try again"
-                return $false
-            } else {
-                $strSourceFolder = "$RootJobFolder$($JobNumber.Trim())_$($RunNumber.Trim())\Launch\"
-                $strSourceFile = $strPotentialFiles[0]
-            }
-        } else {
-            $strSourceFolder = "$RootJobFolder$($JobNumber.Trim())_$($RunNumber.Trim())\Original\"
-            $strSourceFile = $FileName
-        }
-
-        $connectionString = "Server=your_server;Database=neptune;Integrated Security=True;"
-        $strSQL = @"
-SELECT j.JobNo as jobno, j.CustomerID, j.versioninc, j.stateid, s.StepStateID 
-FROM dbo.Jis j 
-INNER JOIN (SELECT MAX(jisid) jisid FROM dbo.Jis WHERE jobno='$($JobNumber.Trim())') M 
-ON j.jisid = M.jisid 
-INNER JOIN dbo.JisStep s ON j.jisid = s.jisid 
-WHERE s.stepid = 204
-"@
-        $result = Query-SQL -sql $strSQL -connectionString $connectionString
-
-        if ($result.Rows.Count -eq 0) {
-            Write-Host "Run Not Launched, This job number isn't setup for Auto Launch"
-            return $false
-        } elseif ($result.Rows[0].StateID -ne 90 -and $result.Rows[0].VersionInc -eq 0) {
-            Write-Host "Run Not Launched, Initial run of this job is not completed and verified"
-            return $false
-        } elseif ($result.Rows[0].StepStateID -ne 20) {
-            Write-Host "Run Not Launched, Data still being imported for previous run"
-            return $false
-        } else {
-            $strSQL = "SELECT COUNT(*) AS GotEntry FROM dbo.MonitoredFiles WHERE islocked = 1 AND username IS NULL AND Filename = '$strSourceFile' AND Folder LIKE '%$($JobNumber.Trim())%'"
-            $result = Query-SQL -sql $strSQL -connectionString $connectionString
-
-            if ($result.Rows[0].GotEntry -gt 0) {
-                Write-Host "Run Not Launched, There is already a partial launch for this run, contact Support"
-                return $false
-            } else {
-                if (-Not (Test-Path $strTarget)) {
-                    New-Item -ItemType Directory -Path $strTarget -Force
-                }
-
-                if (Test-Path "$strTarget$strSourceFile") {
-                    Remove-Item -Path "$strTarget$strSourceFile" -Force
-                    Start-Sleep -Seconds 5
-                }
-
-                Copy-Item -Path "$strSourceFolder$strSourceFile" -Destination $strTarget -Force
-                Check-LaunchAutoLaunch -strTarget $strTarget -strSourceFile $strSourceFile -strUserName $strUserName -JobNumber $JobNumber -RunNumber $RunNumber -RunID $RunID
-            }
-        }
-    }
-
-    return $blnProceed
-}
-
-# CanLaunchJob function
-function Can-LaunchJob {
-    param (
-        [string]$RunID,
-        [string]$JobType,
-        [string]$JobNumber,
-        [int]$RunNumber
+        [ref] [string] $GUID
     )
 
-    $connectionString = "Server=your_server;Database=DataBureauDataLoadAudit;Integrated Security=True;"
-    $strSQL = "EXEC dbo.up_CT_IsLaunchEnabled"
-    $result = Query-SQL -sql $strSQL -connectionString $connectionString
+    # Create an XML Document object
+    $xmlDoc = New-Object System.Xml.XmlDocument
 
-    if ($result.Rows.Count -eq 0 -or $result.Rows[0].ConfigValue.ToLower() -ne "true") {
-        Write-Host "Launch Currently Disabled"
-        return $false
-    }
+    # Define XML structure components
+    $doubleQuote = '"'
 
-    if ($JobType.ToLower() -eq "dpp") {
-        $strSQL = "EXEC dbo.up_CT_DPP_LaunchCheck"
-        $result = Query-SQL -sql $strSQL -connectionString $connectionString
+    $header = '<?xml version="1.0" encoding="utf-8"?>' + "`n"
+    $header2 = "<Request>`n"
 
-        if ($result.Rows.Count -eq 0 -or $result.Rows[0].Enabled -ne $true) {
-            Write-Host "DPP Launch on $($result.Rows[0].Environment) Currently Disabled"
-            return $false
-        }
-    }
+    $requiredNodes = "<Process ID=$doubleQuote$GUID$doubleQuote>"
+    $requiredNodes += "<ProcessName />"
+    $requiredNodes += "<Description />"
+    $requiredNodes += "<ProcessPriority>50</ProcessPriority>"
+    $requiredNodes += "<SuccessNotificationEmail>"
+    $requiredNodes += "<To></To>"
+    $requiredNodes += "<CC />"
+    $requiredNodes += "<BCC />"
+    $requiredNodes += "<Subject />"
+    $requiredNodes += "<Message />"
+    $requiredNodes += "</SuccessNotificationEmail>"
+    $requiredNodes += "<ChangeHistory>"
+    $requiredNodes += "<ChangeDescription />"
+    $requiredNodes += "<ChangedBy />"
+    $requiredNodes += "<ChangedDTS />"
+    $requiredNodes += "</ChangeHistory>"
+    $requiredNodes += "</Process>"
 
-    Check-NeptuneStatus
+    $footer = "</Request>"
 
-    $strSQL = "SELECT COUNT(*) AS JobsRunning FROM dbo.CT_JobRun WHERE RunStatus = 'Running'"
-    $result = Query-SQL -sql $strSQL -connectionString $connectionString
-    $intJobsRunning = $result.Rows[0].JobsRunning
+    # Combine all parts into one XML string
+    $temporaryXML = $header + $header2 + $requiredNodes + $footer
 
-    if ($intJobsRunning -ge 10) {
-        $msgResult = Read-Host "There are already $intJobsRunning jobs running, Do you wish to Launch This job? (Y/N)"
-        if ($msgResult -ne "Y") {
-            return $false
-        }
-    }
+    # Load the XML string into the XmlDocument object
+    $null = $xmlDoc.LoadXml($temporaryXML)
 
-    $strSQL = "EXEC dbo.up_CT_PreviousRunCheck '$JobNumber', $RunNumber"
-    $result = Query-SQL -sql $strSQL -connectionString $connectionString
-    $intPriorRuns = $result.Rows[0].PriorRuns
-
-    if ($intPriorRuns -gt 0) {
-        Write-Host "$intPriorRuns previous run(s) for this job has not finished processing, for now you cannot launch this job"
-        return $false
-    }
-
-    if ($RunNumber -eq 0) {
-        Update-RunStatus -strRunID $RunID -strStatus "Running" -intError 0 -strTTP ""
-        Set-Actions -JobRunStatus "Running"
-        return $false
-    }
-
-    return $true
-}
-
-# CheckNeptuneStatus function
-function Check-NeptuneStatus {
-    $connectionString = "Server=your_server;Database=DataBureauDataLoadAudit;Integrated Security=True;"
-    $strSQL = "SELECT * FROM dbo.vw_CT_JobRunStatus"
-    $result = Query-SQL -sql $strSQL -connectionString $connectionString
-
-    foreach ($row in $result.Rows) {
-        $NewState = $row.NewState
-        $OldState = $row.OldState
-
-        if ($NewState -ne $OldState -and $NewState -ne "") {
-            if ($NewState -eq "Neptune Complete") {
-                $strSQL = "UPDATE R SET R.volume = REPLACE(V.Volume,'*','') FROM dbo.ct_jobrun R INNER JOIN dbo.vw_CallTraceCurrentJobsV4 V ON R.CT_RunID = V.RunID WHERE V.Volume <> '?' AND R.volume IS NULL"
-                Execute-SQLCommand -sql $strSQL -connectionString $connectionString
-            }
-
-            Update-RunStatus -strRunID $row.RunID -strStatus $NewState -intError 0 -strTTP ""
-        }
-    }
-
-    $strSQL = "SELECT JobNo, RunNo FROM dbo.vw_CallTraceCurrentJobsV4 WHERE ISNULL(teleappend,'?') = '?'"
-    $result = Query-SQL -sql $strSQL -connectionString $connectionString
-
-    foreach ($row in $result.Rows) {
-        $strJobNumber = $row.JobNo
-        $strRunNumber = $row.RunNo
-        $strSQL = "EXEC dbo.up_CT_FlagTeleAppend '$strJobNumber','$strRunNumber'"
-        Execute-SQLCommand -sql $strSQL -connectionString $connectionString
-    }
-}
-
-# CheckLaunch_AutoLaunch function
-function Check-LaunchAutoLaunch {
-    param (
-        [string]$strTarget,
-        [string]$strSourceFile,
-        [string]$strUserName,
-        [string]$JobNumber,
-        [int]$RunNumber,
-        [string]$RunID
-    )
-
-    $connectionString = "Server=your_server;Database=neptune;Integrated Security=True;"
-    $strSQL = "EXEC dbo.up_CT_GetLaunchID '$JobNumber', '$strSourceFile'"
-    $result = Query-SQL -sql $strSQL -connectionString $connectionString
-    $MonitorID = $result.Rows[0].MonitorID
-
-    if ($MonitorID -gt 0) {
-        $strSQL = "EXEC dbo.up_CT_ConfirmLaunch '$JobNumber','$RunNumber',$MonitorID,'$strUserName'"
-        Execute-SQLCommand -sql $strSQL -connectionString $connectionString
-        Write-Host "Launch Succeeded"
-        Update-RunStatus -strRunID $RunID -strStatus "Running" -intError 0 -strTTP ""
-        Set-Actions -JobRunStatus "Running"
-        Close-DetailsPageAutoLaunch -RunID $RunID
-    } else {
-        Remove-Item -Path "$strTarget$strSourceFile" -Force
-        Write-Host "Launch Failed, Check File Watcher is Active"
-    }
-}
-
-# Close_DetailsPage_AutoLaunch function (assuming implementation is provided)
-function Close-DetailsPageAutoLaunch {
-    param (
-        [string]$RunID
-    )
-    # Implement the function as needed
+    # Return the XML document
+    return $xmlDoc
 }
