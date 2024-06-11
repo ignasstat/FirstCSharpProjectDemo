@@ -1,43 +1,65 @@
-function CreateDTPXML {
-    param (
-        [ref] [string] $GUID
+function Create-TriggerFile {
+    param(
+        [string]$GUIDString,
+        [ref]$ActionListNames,
+        [string]$SaveLocation,
+        [ref]$NodeStep,
+        [string]$DestinationFolder,
+        [string]$JobNumber,
+        [string]$JobClient
     )
 
-    # Create an XML Document object
+    # Create an XML document with a root element
     $xmlDoc = New-Object System.Xml.XmlDocument
+    $root = $xmlDoc.CreateElement("EFT_Action")
+    $xmlDoc.AppendChild($root) | Out-Null
 
-    # Define XML structure components
-    $doubleQuote = '"'
+    # Helper function to add nodes
+    function Add-XMLNode {
+        param(
+            [System.Xml.XmlElement]$Parent,
+            [string]$ElementName,
+            [string]$Value
+        )
+        $child = $xmlDoc.CreateElement($ElementName)
+        $child.InnerText = $Value
+        $Parent.AppendChild($child) | Out-Null
+    }
 
-    $header = '<?xml version="1.0" encoding="utf-8"?>' + "`n"
-    $header2 = "<Request>`n"
+    # Add nodes with static and dynamic values
+    Add-XMLNode $root "ProcessPriority" "50"
+    Add-XMLNode $root "GUID" $GUIDString
+    Add-XMLNode $root "StepSequence" ([string]$NodeStep.Value)
+    Add-XMLNode $root "CreationDTS" (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+    Add-XMLNode $root "RetriesRemaining" "2"
+    Add-XMLNode $root "LastAttemptDTS" ""
+    Add-XMLNode $root "LastResult" ""
+    Add-XMLNode $root "FailureNotificationEmail" ""
 
-    $requiredNodes = "<Process ID=$doubleQuote$GUID$doubleQuote>"
-    $requiredNodes += "<ProcessName />"
-    $requiredNodes += "<Description />"
-    $requiredNodes += "<ProcessPriority>50</ProcessPriority>"
-    $requiredNodes += "<SuccessNotificationEmail>"
-    $requiredNodes += "<To></To>"
-    $requiredNodes += "<CC />"
-    $requiredNodes += "<BCC />"
-    $requiredNodes += "<Subject />"
-    $requiredNodes += "<Message />"
-    $requiredNodes += "</SuccessNotificationEmail>"
-    $requiredNodes += "<ChangeHistory>"
-    $requiredNodes += "<ChangeDescription />"
-    $requiredNodes += "<ChangedBy />"
-    $requiredNodes += "<ChangedDTS />"
-    $requiredNodes += "</ChangeHistory>"
-    $requiredNodes += "</Process>"
+    # Populate FailureNotificationEmail with more details
+    $emailNode = $root.LastChild
+    Add-XMLNode $emailNode "To" "DataOperationsEFT-CD@transunion.co.uk"
+    Add-XMLNode $emailNode "CC" "DataBureau@transunion.co.uk"
+    Add-XMLNode $emailNode "BCC" ""
+    Add-XMLNode $emailNode "Subject" "DTP - $JobClient - $JobNumber - Completed Transfer trigger creation - Failed"
+    Add-XMLNode $emailNode "Message" "The DTP has failed at creating completed file transfer trigger file in $DestinationFolder."
 
-    $footer = "</Request>"
-
-    # Combine all parts into one XML string
-    $temporaryXML = $header + $header2 + $requiredNodes + $footer
-
-    # Load the XML string into the XmlDocument object
-    $null = $xmlDoc.LoadXml($temporaryXML)
-
-    # Return the XML document
-    return $xmlDoc
+    # Add bespoke command to create a trigger file
+    $triggerFilePath = Join-Path -Path $DestinationFolder -ChildPath "$JobNumber`_$JobClient.trg"
+    Add-XMLNode $root "ActionType" "BespokeCommand"
+    Add-XMLNode $root "SourceFile" "Trigger File | Out-File -FilePath '$triggerFilePath'"
+    
+    # Save the XML to a file
+    $formattedNodeStep = "{0:D2}" -f $NodeStep.Value
+    $xmlPath = Join-Path -Path $SaveLocation -ChildPath "50_$GUIDString_$formattedNodeStep.xml"
+    $xmlDoc.Save($xmlPath)
+    $ActionListNames.Value += "$xmlPath;"
+    
+    # Increment the step
+    $NodeStep.Value += 1
 }
+
+# Usage
+$ActionListNames = ""
+$NodeStep = 0
+Create-TriggerFile -GUIDString "exampleGUID" -ActionListNames ([ref]$ActionListNames) -SaveLocation "C:\Temp" -NodeStep ([ref]$NodeStep) -DestinationFolder "C:\TriggerFiles" -JobNumber "12345" -JobClient "ClientA"
