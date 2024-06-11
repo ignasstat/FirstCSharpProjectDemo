@@ -1,8 +1,19 @@
-function Add-XMLNode($XML_Doc, $Parent, $Name, $Value) {
-    $Node = $XML_Doc.CreateElement($Name)
-    $Node.InnerText = $Value
-    $Parent.AppendChild($Node) | Out-Null
+function Add-XMLNode {
+    param (
+        [System.Xml.XmlDocument]$XML_Doc,     # Document where nodes are created
+        [System.Xml.XmlElement]$XML_Parent,   # Parent element to append this node
+        [string]$NodeName,                    # New node's name
+        [string]$NodeValue                    # New node's value
+    )
+    
+    # Create the new element in the document
+    $Node = $XML_Doc.CreateElement($NodeName)
+    $Node.InnerText = $NodeValue
+
+    # Append the newly created element to the parent
+    $XML_Parent.AppendChild($Node) | Out-Null
 }
+
 
 function Create-TriggerFile {
     param(
@@ -20,30 +31,24 @@ function Create-TriggerFile {
     $root = $xmlDoc.CreateElement("EFT_Action")
     $xmlDoc.AppendChild($root) | Out-Null
 
-    $NodeStep = 0
-    # Add nodes with static and dynamic values
-    Add-XMLNode $root "ProcessPriority" "50"
-    Add-XMLNode $root "GUID" $GUIDString
-    Add-XMLNode $root "StepSequence" ([string]$NodeStep.Value)
-    Add-XMLNode $root "CreationDTS" (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-    Add-XMLNode $root "RetriesRemaining" "2"
-    Add-XMLNode $root "LastAttemptDTS" ""
-    Add-XMLNode $root "LastResult" ""
-    Add-XMLNode $root "FailureNotificationEmail" ""
+    # Add nodes to the XML document
+    Add-XMLNode $xmlDoc $root "ProcessPriority" "50"
+    Add-XMLNode $xmlDoc $root "GUID" $GUIDString
+    Add-XMLNode $xmlDoc $root "StepSequence" ([string]$NodeStep.Value)
+    Add-XMLNode $xmlDoc $root "CreationDTS" (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+    Add-XMLNode $xmlDoc $root "RetriesRemaining" "2"
+    Add-XMLNode $xmlDoc $root "LastAttemptDTS" ""
+    Add-XMLNode $xmlDoc $root "LastResult" ""
+    Add-XMLNode $xmlDoc $root "FailureNotificationEmail" ""
 
-    # Populate FailureNotificationEmail with more details
+    # Ensure $emailNode is correctly referenced as the last child element added
     $emailNode = $root.LastChild
-    Add-XMLNode $emailNode "To" "DataOperationsEFT-CD@transunion.co.uk"
-    Add-XMLNode $emailNode "CC" "DataBureau@transunion.co.uk"
-    Add-XMLNode $emailNode "BCC" ""
-    Add-XMLNode $emailNode "Subject" "DTP - $JobClient - $JobNumber - Completed Transfer trigger creation - Failed"
-    Add-XMLNode $emailNode "Message" "The DTP has failed at creating completed file transfer trigger file in $DestinationFolder."
+    Add-XMLNode $xmlDoc $emailNode "To" "DataOperationsEFT-CD@transunion.co.uk"
+    Add-XMLNode $xmlDoc $emailNode "CC" "DataBureau@transunion.co.uk"
+    Add-XMLNode $xmlDoc $emailNode "BCC" ""
+    Add-XMLNode $xmlDoc $emailNode "Subject" "DTP - $JobClient - $JobNumber - Email Notification - Failed"
+    Add-XMLNode $xmlDoc $emailNode "Message" "The DTP has failed at creating a completed file transfer trigger file in $DestinationFolder."
 
-    # Add bespoke command to create a trigger file
-    $triggerFilePath = Join-Path -Path $DestinationFolder -ChildPath "$JobNumber`_$JobClient.trg"
-    Add-XMLNode $root "ActionType" "BespokeCommand"
-    Add-XMLNode $root "SourceFile" "Trigger File | Out-File -FilePath '$triggerFilePath'"
-    
     # Save the XML to a file
     $formattedNodeStep = "{0:D2}" -f $NodeStep.Value
     $xmlPath = Join-Path -Path $SaveLocation -ChildPath "50_$GUIDString_$formattedNodeStep.xml"
@@ -51,326 +56,5 @@ function Create-TriggerFile {
     $ActionListNames.Value += "$xmlPath;"
     
     # Increment the step
-    $NodeStep.Value += 1
+    $NodeStep.Value++
 }
-# Usage
-$ActionListNames = ""
-$NodeStep = 0
-Create-TriggerFile -GUIDString "0001" -ActionListNames ([ref]$ActionListNames) -SaveLocation "\\cig.local\data\AppData\SFTP\Data\Usr\DataBureau\Configuration\Scripts\Test\CallTrace Console\CTC124_125\Other" -NodeStep ([ref]$NodeStep) -DestinationFolder "\\cig.local\data\AppData\SFTP\Data\Usr\DataBureau\Configuration\Scripts\Test\CallTrace Console\CTC124_125\Other" -JobNumber "12345" -JobClient "ClientA"
-
-
-Method invocation failed because [System.Xml.XmlElement] does not contain a method named 'CreateElement'.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (CreateElement:String) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-Method invocation failed because [System.Xml.XmlElement] does not contain a method named 'CreateElement'.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (CreateElement:String) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-Method invocation failed because [System.Xml.XmlElement] does not contain a method named 'CreateElement'.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (CreateElement:String) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-Method invocation failed because [System.Xml.XmlElement] does not contain a method named 'CreateElement'.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (CreateElement:String) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-Method invocation failed because [System.Xml.XmlElement] does not contain a method named 'CreateElement'.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (CreateElement:String) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-Method invocation failed because [System.Xml.XmlElement] does not contain a method named 'CreateElement'.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (CreateElement:String) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-Method invocation failed because [System.Xml.XmlElement] does not contain a method named 'CreateElement'.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (CreateElement:String) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-Method invocation failed because [System.Xml.XmlElement] does not contain a method named 'CreateElement'.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (CreateElement:String) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-You cannot call a method on a null-valued expression.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : InvokeMethodOnNull
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-You cannot call a method on a null-valued expression.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : InvokeMethodOnNull
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-You cannot call a method on a null-valued expression.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : InvokeMethodOnNull
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-You cannot call a method on a null-valued expression.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : InvokeMethodOnNull
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-You cannot call a method on a null-valued expression.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : InvokeMethodOnNull
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-Method invocation failed because [System.Xml.XmlElement] does not contain a method named 'CreateElement'.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (CreateElement:String) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-Method invocation failed because [System.Xml.XmlElement] does not contain a method named 'CreateElement'.
-At line:2 char:5
-+     $Node = $XML_Doc.CreateElement($Name)
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (CreateElement:String) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
-The property 'InnerText' cannot be found on this object. Verify that the property exists and can be set.
-At line:3 char:5
-+     $Node.InnerText = $Value
-+     ~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : PropertyNotFound
- 
-Method invocation failed because [System.String] does not contain a method named 'AppendChild'.
-At line:4 char:5
-+     $Parent.AppendChild($Node) | Out-Null
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
-    + FullyQualifiedErrorId : MethodNotFound
- 
