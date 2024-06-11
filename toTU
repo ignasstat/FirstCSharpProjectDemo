@@ -1,3 +1,53 @@
+function Create-TriggerFile {
+    param(
+        [string]$GUIDString,
+        [ref]$ActionListNames,
+        [string]$SaveLocation,
+        [ref]$NodeStep,
+        [string]$DestinationFolder,
+        [string]$JobNumber,
+        [string]$JobClient
+    )
+
+    # Create an XML document with a root element
+    $xmlDoc = New-Object System.Xml.XmlDocument
+    $root = $xmlDoc.CreateElement("EFT_Action")
+    $xmlDoc.AppendChild($root) | Out-Null
+
+
+    # Add nodes with static and dynamic values
+    Add-XMLNode $root "ProcessPriority" "50"
+    Add-XMLNode $root "GUID" $GUIDString
+    Add-XMLNode $root "StepSequence" ([string]$NodeStep.Value)
+    Add-XMLNode $root "CreationDTS" (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+    Add-XMLNode $root "RetriesRemaining" "2"
+    Add-XMLNode $root "LastAttemptDTS" ""
+    Add-XMLNode $root "LastResult" ""
+    Add-XMLNode $root "FailureNotificationEmail" ""
+
+    # Populate FailureNotificationEmail with more details
+    $emailNode = $root.LastChild
+    Add-XMLNode $emailNode "To" "DataOperationsEFT-CD@transunion.co.uk"
+    Add-XMLNode $emailNode "CC" "DataBureau@transunion.co.uk"
+    Add-XMLNode $emailNode "BCC" ""
+    Add-XMLNode $emailNode "Subject" "DTP - $JobClient - $JobNumber - Completed Transfer trigger creation - Failed"
+    Add-XMLNode $emailNode "Message" "The DTP has failed at creating completed file transfer trigger file in $DestinationFolder."
+
+    # Add bespoke command to create a trigger file
+    $triggerFilePath = Join-Path -Path $DestinationFolder -ChildPath "$JobNumber`_$JobClient.trg"
+    Add-XMLNode $root "ActionType" "BespokeCommand"
+    Add-XMLNode $root "SourceFile" "Trigger File | Out-File -FilePath '$triggerFilePath'"
+    
+    # Save the XML to a file
+    $formattedNodeStep = "{0:D2}" -f $NodeStep.Value
+    $xmlPath = Join-Path -Path $SaveLocation -ChildPath "50_$GUIDString_$formattedNodeStep.xml"
+    $xmlDoc.Save($xmlPath)
+    $ActionListNames.Value += "$xmlPath;"
+    
+    # Increment the step
+    $NodeStep.Value += 1
+}
+
 function Add-XMLNode {
     param (
         [System.Xml.XmlDocument]$XML_Doc,
@@ -14,75 +64,4 @@ function Add-XMLNode {
 
     # Set the text value of the new element
     $XML_Element.InnerText = $NodeValue
-}
-
-
-function CreateEmailNode($GUIDString, [ref]$ActionListNames, $SaveLocation, [ref]$nodeStep, $FileList, $DeliveryFolder, $Email_To, $Email_CC, $Email_BCC, $GUIDFromString, $JobNumber, $JobClient) {
-    # This PowerShell script replicates the VBA function for creating an email node and modifying an XML document.
-
-    # Load necessary assembly for XML manipulation
-    [System.Reflection.Assembly]::LoadWithPartialName("System.Xml")
-
-    $XML_Doc = New-Object System.Xml.XmlDocument
-    $crlf = "`r`n"
-
-    # Determine Email Subject based on delivery folder
-    if ($DeliveryFolder -ilike "*calltrace*") {
-        $EmailSubject = "TransUnion UK - EFT Server Notification: CallTrace Output"
-    } elseif ($DeliveryFolder -ilike "*intouch*" -or $DeliveryFolder -ilike "*in touch*") {
-        $EmailSubject = "TransUnion UK - EFT Server Notification: InTouch Output"
-    } else {
-        $EmailSubject = "TransUnion UK - EFT Server Output Notification"
-    }
-
-    # Generate Email Body
-    $EmailBody = $crlf + "This message was sent to you automatically from TransUnion UK" + $crlf + $crlf
-    $EmailBody += "Delivery Time :               $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" + $crlf + $crlf
-    $EmailBody += "Files available for download: " + $crlf + $crlf
-
-    # Add files to the email body
-    if ($FileList -is [array]) {
-        foreach ($FileCopied in $FileList) {
-            $EmailBody += "        $FileCopied" + $crlf
-        }
-    } else {
-        $EmailBody += "        $FileList" + $crlf
-    }
-
-    $EmailBody += $crlf + "Please do not reply to this email as the mailbox is not monitored" + $crlf
-
-    # Create XML Action element
-    $XML_Action = $XML_Doc.CreateElement("EFT_Action")
-    $XML_Doc.AppendChild($XML_Action) | Out-Null
-
-    # Add child nodes
-    Add-XMLNode -XML_Doc $XML_Doc -Parent $XML_Action -Name "ProcessPriority" -Value "50"
-    Add-XMLNode -XML_Doc $XML_Doc -Parent $XML_Action -Name "GUID" -Value $GUIDString
-    Add-XMLNode -XML_Doc $XML_Doc -Parent $XML_Action -Name "StepSequence" -Value "$nodeStep"
-    Add-XMLNode -XML_Doc $XML_Doc -Parent $XML_Action -Name "CreationDTS" -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    Add-XMLNode -XML_Doc $XML_Doc -Parent $XML_Action -Name "RetriesRemaining" -Value "2"
-    Add-XMLNode -XML_Doc $XML_Doc -Parent $XML_Action -Name "LastAttemptDTS" -Value ""
-    Add-XMLNode -XML_Doc $XML_Doc -Parent $XML_Action -Name "LastResult" -Value ""
-
-    # Create and populate Email nodes
-    $XML_Email = $XML_Doc.CreateElement("SuccessNotificationEmail")
-    $XML_Action.AppendChild($XML_Email) | Out-Null
-    Add-XMLNode -XML_Doc $XML_Doc -Parent $XML_Email -Name "To" -Value $Email_To
-    Add-XMLNode -XML_Doc $XML_Doc -Parent $XML_Email -Name "CC" -Value $Email_CC
-    Add-XMLNode -XML_Doc $XML_Doc -Parent $XML_Email -Name "BCC" -Value $Email_BCC
-    Add-XMLNode -XML_Doc $XML_Doc -Parent $XML_Email -Name "Subject" -Value $EmailSubject
-    Add-XMLNode -XML_Doc $XML_Doc -Parent $XML_Email -Name "Message" -Value $EmailBody
-
-    # Saving XML to file
-    $ActionXMLPath = Join-Path $SaveLocation ("50_$GUIDString_" + ('{0:D2}' -f $nodeStep) + ".xml")
-    $XML_Doc.Save($ActionXMLPath)
-    $ActionListNames.Value += $ActionXMLPath + ";"
-
-    $nodeStep.Value++
-}
-
-function Add-XMLNode($XML_Doc, $Parent, $Name, $Value) {
-    $Node = $XML_Doc.CreateElement($Name)
-    $Node.InnerText = $Value
-    $Parent.AppendChild($Node) | Out-Null
 }
